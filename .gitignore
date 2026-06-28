@@ -1,0 +1,41 @@
+# Build outputs
+build/
+dist/
+out/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test and coverage artifacts
+*.test
+coverage.out
+coverage.html
+*.coverprofile
+
+# Go workspace/vendor artifacts
+go.work
+go.work.sum
+vendor/
+
+# Local config and secrets
+gorelay.yaml
+gorelay.yml
+*.local.yaml
+*.local.yml
+certs/
+*.crt
+*.key
+*.pem
+
+# Logs and runtime files
+*.log
+*.pid
+
+# Editor/OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

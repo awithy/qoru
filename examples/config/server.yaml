@@ -1,0 +1,9 @@
+node_id: server-1
+mode: server
+
+identity:
+  cert: ./certs/server-1.crt
+  key: ./certs/server-1.key
+  ca: ./certs/ca.crt
+
+listen: 127.0.0.1:4433
