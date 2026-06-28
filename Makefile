@@ -1,4 +1,4 @@
-.PHONY: build test
+.PHONY: build test gen-dev-certs
 
 build:
 	@mkdir -p build
@@ -6,3 +6,6 @@ build:
 
 test:
 	go test ./...
+
+gen-dev-certs:
+	./dev/gen-certs.sh

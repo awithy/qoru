@@ -2,9 +2,9 @@ node_id: client-1
 mode: client
 
 identity:
-  cert: ./certs/client-1.crt
-  key: ./certs/client-1.key
-  ca: ./certs/ca.crt
+  cert: ./dev/certs/client-1.crt
+  key: ./dev/certs/client-1.key
+  ca: ./dev/certs/ca.crt
 
 server:
   id: server-1

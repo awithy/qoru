@@ -24,6 +24,7 @@ gorelay.yml
 *.local.yaml
 *.local.yml
 certs/
+dev/certs/
 *.crt
 *.key
 *.pem
