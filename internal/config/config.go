@@ -8,10 +8,10 @@ const (
 )
 
 var DefaultPaths = []string{
-	"./gorelay.yaml",
-	"./gorelay.yml",
-	"/etc/gorelay/config.yaml",
-	"/etc/gorelay/config.yml",
+	"./qoru.yaml",
+	"./qoru.yml",
+	"/etc/qoru/config.yaml",
+	"/etc/qoru/config.yml",
 }
 
 type Config struct {

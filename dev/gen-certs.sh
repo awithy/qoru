@@ -13,7 +13,7 @@ x509_extensions = v3_ca
 prompt = no
 
 [req_distinguished_name]
-CN = gorelay-dev-ca
+CN = qoru-dev-ca
 
 [v3_ca]
 basicConstraints = critical,CA:TRUE

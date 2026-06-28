@@ -19,8 +19,8 @@ go.work.sum
 vendor/
 
 # Local config and secrets
-gorelay.yaml
-gorelay.yml
+qoru.yaml
+qoru.yml
 *.local.yaml
 *.local.yml
 certs/

@@ -2,7 +2,7 @@
 
 build:
 	@mkdir -p build
-	go build -o build/gorelay ./cmd/gorelay
+	go build -o build/qoru ./cmd/qoru
 
 test:
 	go test ./...

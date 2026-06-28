@@ -15,12 +15,12 @@ func NewRootCommand() *cobra.Command {
 	opts := &rootOptions{}
 
 	cmd := &cobra.Command{
-		Use:   "gorelay",
+		Use:   "qoru",
 		Short: "Experimental chainable network relay/proxy",
-		Long:  "gorelay is an experimental chainable network relay/proxy for TCP and UDP connections.",
+		Long:  "qoru is an experimental chainable network relay/proxy for TCP and UDP connections.",
 	}
 
-	cmd.PersistentFlags().StringVarP(&opts.configPath, "config", "c", "", "path to gorelay config file")
+	cmd.PersistentFlags().StringVarP(&opts.configPath, "config", "c", "", "path to qoru config file")
 
 	return cmd
 }

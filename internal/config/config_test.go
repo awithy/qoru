@@ -19,7 +19,7 @@ func TestResolvePathUsesExplicitPath(t *testing.T) {
 func TestResolvePathFindsFirstDefaultPath(t *testing.T) {
 	tmp := t.TempDir()
 	first := filepath.Join(tmp, "missing.yaml")
-	second := filepath.Join(tmp, "gorelay.yaml")
+	second := filepath.Join(tmp, "qoru.yaml")
 	if err := os.WriteFile(second, []byte("node_id: test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestResolvePathFindsFirstDefaultPath(t *testing.T) {
 }
 
 func TestResolvePathReturnsFalseWhenNoDefaultExists(t *testing.T) {
-	path, ok := ResolvePathWithDefaults("", []string{filepath.Join(t.TempDir(), "gorelay.yaml")})
+	path, ok := ResolvePathWithDefaults("", []string{filepath.Join(t.TempDir(), "qoru.yaml")})
 	if ok {
 		t.Fatalf("expected no resolved path, got %q", path)
 	}

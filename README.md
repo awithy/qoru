@@ -1,6 +1,6 @@
-# gorelay
+# qoru
 
-`gorelay` is an experimental chainable network relay/proxy for TCP and UDP connections, written in Go.
+`qoru` is an experimental chainable network relay/proxy for TCP and UDP connections, written in Go.
 
 The goal is to create a small authenticated QUIC-based relay overlay where clients and relay nodes can forward traffic across one or more hops while preserving end-to-end payload confidentiality from intermediary relays.
 
@@ -9,16 +9,16 @@ The goal is to create a small authenticated QUIC-based relay overlay where clien
 Basic one-hop topology:
 
 ```text
-TCP/UDP client -> gorelay client -> gorelay server -> TCP/UDP server
+TCP/UDP client -> qoru client -> qoru server -> TCP/UDP server
 ```
 
 Chained topology:
 
 ```text
-TCP/UDP client -> gorelay client -> gorelay server -> gorelay server -> TCP/UDP server
+TCP/UDP client -> qoru client -> qoru server -> qoru server -> TCP/UDP server
 ```
 
-`gorelay` nodes communicate with each other over QUIC. Each peer connection is authenticated with mTLS, and proxied payloads can be encrypted end-to-end between the ingress and egress nodes so intermediary relays cannot inspect the traffic they forward.
+`qoru` nodes communicate with each other over QUIC. Each peer connection is authenticated with mTLS, and proxied payloads can be encrypted end-to-end between the ingress and egress nodes so intermediary relays cannot inspect the traffic they forward.
 
 ## Goals
 
@@ -48,7 +48,7 @@ The first version should stay intentionally small. These features can come later
 
 ## Security Model
 
-`gorelay` uses two security layers:
+`qoru` uses two security layers:
 
 ```text
 Application payload encryption  = end-to-end, ingress -> egress
@@ -81,7 +81,7 @@ Intermediaries may still see routing metadata such as previous hop, next hop, st
 
 The intended architecture is a small QUIC overlay network.
 
-Each `gorelay` process may act as one or more of:
+Each `qoru` process may act as one or more of:
 
 - local ingress proxy
 - relay node
@@ -129,12 +129,12 @@ The same binary should be configurable for client-like or server-like behavior.
 
 - Track configured and connected peers.
 - Expose topology via CLI/API.
-- Add commands such as `gorelay topology`.
+- Add commands such as `qoru topology`.
 
 ## Possible Package Layout
 
 ```text
-cmd/gorelay/
+cmd/qoru/
   main.go
 
 internal/config/

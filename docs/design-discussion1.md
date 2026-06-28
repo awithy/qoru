@@ -1,19 +1,19 @@
-# gorelay Design Discussion Notes
+# qoru Design Discussion Notes
 
 ## Project Summary
 
-`gorelay` is intended to be a chainable network relay/proxy for TCP and UDP traffic, written in Go. Relay nodes communicate with each other using QUIC.
+`qoru` is intended to be a chainable network relay/proxy for TCP and UDP traffic, written in Go. Relay nodes communicate with each other using QUIC.
 
 Basic topology:
 
 ```text
-TCP/UDP client -> gorelay client -> gorelay server -> TCP/UDP server
+TCP/UDP client -> qoru client -> qoru server -> TCP/UDP server
 ```
 
 Chained topology:
 
 ```text
-TCP/UDP client -> gorelay client -> gorelay server -> gorelay server -> TCP/UDP server
+TCP/UDP client -> qoru client -> qoru server -> qoru server -> TCP/UDP server
 ```
 
 A practical initial limit of 3 hops is acceptable, though the protocol can be designed to support arbitrary route length with a configured maximum.
@@ -40,7 +40,7 @@ A practical initial limit of 3 hops is acceptable, though the protocol can be de
 
 ## Recommended Mental Model
 
-`gorelay` should be designed as a small authenticated QUIC overlay network rather than only a simple proxy.
+`qoru` should be designed as a small authenticated QUIC overlay network rather than only a simple proxy.
 
 Each node may act as one or more of:
 
@@ -83,7 +83,7 @@ For TCP, each accepted local TCP connection maps to a QUIC stream.
 Example:
 
 ```text
-local TCP connection -> encrypted gorelay frames -> QUIC stream -> egress TCP connection
+local TCP connection -> encrypted qoru frames -> QUIC stream -> egress TCP connection
 ```
 
 This should be the first implementation target because it is simpler than UDP.
@@ -171,7 +171,7 @@ Each node should have:
 The node ID should be bound to the certificate. A SPIFFE-like URI SAN is a good option:
 
 ```text
-spiffe://gorelay/relay-a
+spiffe://qoru/relay-a
 ```
 
 mTLS provides:
@@ -196,8 +196,8 @@ Layering:
 
 ```text
 TCP/UDP payload
-  encrypted end-to-end by gorelay
-    carried inside gorelay relay protocol
+  encrypted end-to-end by qoru
+    carried inside qoru relay protocol
       carried inside QUIC stream/datagram
         protected by QUIC TLS/mTLS to the next peer
 ```
@@ -450,7 +450,7 @@ Initial implementation can keep this simple:
 Example CLI output:
 
 ```text
-gorelay topology
+qoru topology
 
 client
   └── relay-a
@@ -520,12 +520,12 @@ End-to-end encryption hides payload and encrypted destination metadata, but it d
 
 - expose connected peers
 - expose configured routes/services
-- add `gorelay topology` command
+- add `qoru topology` command
 
 ## Possible Go Package Structure
 
 ```text
-cmd/gorelay/
+cmd/qoru/
   main.go
 
 internal/config/

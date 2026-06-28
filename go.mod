@@ -1,4 +1,4 @@
-module github.com/awithy/gorelay
+module github.com/awithy/qoru
 
 go 1.26.4
 
