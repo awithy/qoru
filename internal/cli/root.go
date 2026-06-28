@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/awithy/qoru/internal/client"
 	"github.com/awithy/qoru/internal/config"
 	"github.com/awithy/qoru/internal/server"
 	"github.com/spf13/cobra"
@@ -26,7 +27,7 @@ type commandRunners struct {
 
 func NewRootCommand() *cobra.Command {
 	return newRootCommand(commandRunners{
-		client: runClientPlaceholder,
+		client: client.Run,
 		server: runServer,
 	})
 }
@@ -67,14 +68,6 @@ func newClientCommand(opts *rootOptions, runner runnerFunc) *cobra.Command {
 			return runner(cmd.Context(), cfg, newLogger(cmd))
 		},
 	}
-}
-
-func runClientPlaceholder(_ context.Context, cfg *config.Config, logger *slog.Logger) error {
-	if err := config.ValidateClient(cfg); err != nil {
-		return err
-	}
-	logger.Info("client starting", "node_id", cfg.NodeID)
-	return nil
 }
 
 func newServerCommand(opts *rootOptions, runner runnerFunc) *cobra.Command {

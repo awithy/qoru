@@ -57,11 +57,22 @@ tcp_forwards:
   - listen: 127.0.0.1:15432
     target: 127.0.0.1:5432
 `)
-	out, err := executeCommand(NewRootCommand(), "client", "-c", path)
+	cmd := newRootCommand(commandRunners{
+		client: func(_ context.Context, cfg *config.Config, logger *slog.Logger) error {
+			if err := config.ValidateClient(cfg); err != nil {
+				return err
+			}
+			logger.Info("client runner called", "node_id", cfg.NodeID)
+			return nil
+		},
+		server: runServer,
+	})
+
+	out, err := executeCommand(cmd, "client", "-c", path)
 	if err != nil {
 		t.Fatalf("expected client command to succeed: %v", err)
 	}
-	if !strings.Contains(out, "msg=\"client starting\"") || !strings.Contains(out, "node_id=client-1") {
+	if !strings.Contains(out, "msg=\"client runner called\"") || !strings.Contains(out, "node_id=client-1") {
 		t.Fatalf("unexpected output: %q", out)
 	}
 }
@@ -77,7 +88,9 @@ listen: 127.0.0.1:4433
 `)
 
 	cmd := newRootCommand(commandRunners{
-		client: runClientPlaceholder,
+		client: func(_ context.Context, cfg *config.Config, logger *slog.Logger) error {
+			return config.ValidateClient(cfg)
+		},
 		server: func(_ context.Context, cfg *config.Config, logger *slog.Logger) error {
 			if err := config.ValidateServer(cfg); err != nil {
 				return err
