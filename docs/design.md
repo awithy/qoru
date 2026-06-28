@@ -2,13 +2,13 @@
 
 ## Overview
 
-`qoru` is an experimental QUIC-based network relay/proxy. The first implementation slice targets a basic authenticated TCP proxy shape:
+`qoru` is an experimental QUIC-based network relay/proxy. The first implementation target is a basic authenticated TCP proxy shape:
 
 ```text
 TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
 ```
 
-The current codebase is scaffolding toward that goal. It includes CLI/config handling, development certificate generation, TLS identity loading, and a minimal QUIC server listener.
+The current codebase has CLI/config handling, development certificate generation, TLS identity loading, a custom binary protocol, a QUIC server, a simple QUIC client, and server-side TCP target proxying over a QUIC stream.
 
 ## CLI Shape
 
@@ -39,11 +39,13 @@ If `--config` is omitted, qoru resolves config using the first existing path fro
 
 ### `qoru client`
 
-Loads and validates a client config. The client runtime is still a placeholder.
+Loads and validates a client config, connects to the configured qoru server with QUIC/mTLS, opens a QUIC stream, sends a `ConnectTCPRequest` for the first configured TCP forward target, then closes the stream.
+
+The long-running local TCP listener is not implemented yet.
 
 ### `qoru server`
 
-Loads and validates a server config, loads its TLS identity, starts a QUIC listener, and blocks until canceled.
+Loads and validates a server config, loads its TLS identity, starts a QUIC listener, accepts connections/streams, reads `ConnectTCPRequest`, dials the requested TCP target, and proxies bytes between the QUIC stream and target TCP connection.
 
 ### `qoru print-config`
 
@@ -155,6 +157,47 @@ qoru/1
 
 This identifies the application protocol being spoken over QUIC/TLS and gives us a future versioning point.
 
+## Binary Protocol
+
+qoru uses a small custom binary protocol for control messages. It intentionally does not use JSON or protobuf.
+
+Frame envelope:
+
+```text
+version uint8
+type    uint8
+length  uint16 big endian
+payload []byte
+```
+
+Current constants:
+
+```go
+Version = 1
+TypeConnectTCP = 1
+MaxPayloadSize = 64*1024 - 1
+MaxTargetLength = 4096
+```
+
+The first message is `ConnectTCPRequest`, meaning: ask the server to dial a TCP target.
+
+Payload format:
+
+```text
+target_len uint16 big endian
+target     []byte
+```
+
+Current TCP stream model:
+
+```text
+[ConnectTCPRequest frame][raw TCP bytes...]
+```
+
+The control request is framed. Once the server dials the TCP target, the remaining stream bytes are proxied directly between the QUIC stream and TCP connection.
+
+Future multi-hop/end-to-end encryption will likely require framed encrypted data messages, but the first one-hop TCP slice keeps raw bytes after the initial control frame.
+
 ## Logging
 
 Runtime commands use Go's standard `log/slog` text handler, which emits logfmt-style output:
@@ -178,10 +221,29 @@ The current server runtime lives in `internal/server`.
 3. starts a QUIC listener on `cfg.Listen`
 4. logs the bound address
 5. accepts QUIC connections
-6. immediately closes accepted connections with `not implemented`
-7. exits cleanly when the context is canceled
+6. accepts one stream per connection currently
+7. reads a `ConnectTCPRequest`
+8. dials the requested TCP target
+9. proxies bytes between the QUIC stream and TCP target
+10. exits cleanly when the context is canceled
 
-No stream protocol or TCP proxying is implemented yet.
+Current limitation: connection/stream lifecycle is still minimal. The server handles one stream per accepted connection in the current path.
+
+## Client Runtime
+
+The current client runtime lives in `internal/client`.
+
+`client.Run` currently:
+
+1. validates client config
+2. connects to the configured qoru server with QUIC/mTLS
+3. opens a stream
+4. sends a `ConnectTCPRequest` for the first configured `tcp_forwards` target
+5. closes the stream
+
+`client.ConnectTCP` is a lower-level helper used by tests to open a QUIC stream to a target and leave it available for byte exchange.
+
+Current limitation: the client does not yet start local TCP listeners from `tcp_forwards.listen`.
 
 ## CLI Runtime Wiring
 
@@ -193,7 +255,7 @@ type runnerFunc func(context.Context, *config.Config, *slog.Logger) error
 
 This lets CLI tests verify that commands load config and call the expected runner without starting real QUIC listeners.
 
-The real server runner delegates to `server.Run`.
+The real runners delegate to `client.Run` and `server.Run`.
 
 ## Development Certificates
 
@@ -227,9 +289,11 @@ server-1.key
 ```text
 cmd/qoru/              CLI entrypoint
 internal/cli/          Cobra commands and command wiring
+internal/client/       QUIC client runtime and ConnectTCP helper
 internal/config/       config structs, path resolution, YAML load/marshal, validation
 internal/identity/     TLS and mTLS identity loading
-internal/server/       minimal QUIC server runtime
+internal/protocol/     custom binary frame protocol
+internal/server/       QUIC server runtime and TCP proxying
 dev/                   local development helpers
 examples/config/       example client/server YAML configs
 docs/                  design documentation
@@ -237,9 +301,9 @@ docs/                  design documentation
 
 ## Near-Term Next Steps
 
-1. Add minimal client runtime that connects to the QUIC server with mTLS.
-2. Add an integration test that starts the server on `127.0.0.1:0` and connects with the client.
-3. Define the first stream metadata frame containing the requested TCP target.
-4. Implement server-side TCP dialing.
-5. Proxy bytes between local TCP connection, QUIC stream, and target TCP connection.
+1. Implement qoru client local TCP listeners from `tcp_forwards.listen`.
+2. For each local TCP connection, open a QUIC stream, send `ConnectTCPRequest`, and proxy bytes both ways.
+3. Decide whether to reuse one QUIC connection for multiple streams or initially dial per accepted local connection.
+4. Improve server handling to support multiple streams per QUIC connection.
+5. Add full end-to-end integration test: local TCP client -> qoru client listener -> qoru server -> TCP echo target.
 6. Add server-side target access policy in a later slice.

@@ -16,16 +16,33 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return err
 	}
 
-	tlsConfig, err := identity.ClientTLSConfig(cfg.Identity, cfg.Server.ID)
-	if err != nil {
-		return err
-	}
-
-	conn, err := quic.DialAddr(ctx, cfg.Server.Address, tlsConfig, &quic.Config{})
+	conn, stream, err := ConnectTCP(ctx, cfg, cfg.TCPForwards[0].Target, logger)
 	if err != nil {
 		return err
 	}
 	defer conn.CloseWithError(0, "done")
+
+	if err := stream.Close(); err != nil {
+		return err
+	}
+	_, _ = io.Copy(io.Discard, stream)
+	return nil
+}
+
+func ConnectTCP(ctx context.Context, cfg *config.Config, target string, logger *slog.Logger) (*quic.Conn, *quic.Stream, error) {
+	if err := config.ValidateClient(cfg); err != nil {
+		return nil, nil, err
+	}
+
+	tlsConfig, err := identity.ClientTLSConfig(cfg.Identity, cfg.Server.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	conn, err := quic.DialAddr(ctx, cfg.Server.Address, tlsConfig, &quic.Config{})
+	if err != nil {
+		return nil, nil, err
+	}
 
 	if logger != nil {
 		logger.Info("client connected", "node_id", cfg.NodeID, "server_id", cfg.Server.ID, "addr", cfg.Server.Address)
@@ -33,16 +50,15 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	stream, err := conn.OpenStreamSync(ctx)
 	if err != nil {
-		return err
+		_ = conn.CloseWithError(0, "open stream failed")
+		return nil, nil, err
 	}
 
-	if err := protocol.WriteConnectTCPRequest(stream, protocol.ConnectTCPRequest{Target: cfg.TCPForwards[0].Target}); err != nil {
+	if err := protocol.WriteConnectTCPRequest(stream, protocol.ConnectTCPRequest{Target: target}); err != nil {
 		_ = stream.Close()
-		return err
+		_ = conn.CloseWithError(0, "write connect tcp request failed")
+		return nil, nil, err
 	}
-	if err := stream.Close(); err != nil {
-		return err
-	}
-	_, _ = io.Copy(io.Discard, stream)
-	return nil
+
+	return conn, stream, nil
 }

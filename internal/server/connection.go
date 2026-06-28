@@ -19,7 +19,6 @@ func handleConnection(ctx context.Context, conn *quic.Conn, logger *slog.Logger,
 		}
 		return
 	}
-	defer stream.Close()
 
 	req, err := protocol.ReadConnectTCPRequest(stream)
 	if err != nil {
@@ -48,4 +47,6 @@ func handleConnection(ctx context.Context, conn *quic.Conn, logger *slog.Logger,
 	if logger != nil {
 		logger.Info("tcp target connected", "target", req.Target)
 	}
+
+	proxyTCP(stream, targetConn)
 }
