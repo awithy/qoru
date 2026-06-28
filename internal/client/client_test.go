@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"testing"
 	"time"
 
@@ -44,6 +45,22 @@ func TestRunConnectsToServerWithMTLS(t *testing.T) {
 		t.Fatal("timed out waiting for server to start")
 	}
 
+	targetListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer targetListener.Close()
+
+	targetAccepted := make(chan struct{}, 1)
+	go func() {
+		conn, err := targetListener.Accept()
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+		targetAccepted <- struct{}{}
+	}()
+
 	clientCfg := &config.Config{
 		NodeID:   "client-1",
 		Mode:     config.ModeClient,
@@ -51,7 +68,7 @@ func TestRunConnectsToServerWithMTLS(t *testing.T) {
 		Server:   &config.ServerConfig{ID: "server-1", Address: addr},
 		TCPForwards: []config.TCPForwardConfig{{
 			Listen: "127.0.0.1:15432",
-			Target: "127.0.0.1:5432",
+			Target: targetListener.Addr().String(),
 		}},
 	}
 
@@ -61,11 +78,17 @@ func TestRunConnectsToServerWithMTLS(t *testing.T) {
 
 	select {
 	case req := <-received:
-		if req.Target != "127.0.0.1:5432" {
-			t.Fatalf("expected target 127.0.0.1:5432, got %q", req.Target)
+		if req.Target != targetListener.Addr().String() {
+			t.Fatalf("expected target %q, got %q", targetListener.Addr().String(), req.Target)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for server to receive connect tcp request")
+	}
+
+	select {
+	case <-targetAccepted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for server to dial target")
 	}
 
 	cancel()
