@@ -6,11 +6,13 @@ import (
 
 	"github.com/awithy/qoru/internal/config"
 	"github.com/awithy/qoru/internal/identity"
+	"github.com/awithy/qoru/internal/protocol"
 	"github.com/quic-go/quic-go"
 )
 
 type options struct {
-	started func(addr string)
+	started           func(addr string)
+	connectTCPRequest func(req protocol.ConnectTCPRequest)
 }
 
 type Option func(*options)
@@ -18,6 +20,12 @@ type Option func(*options)
 func WithStartedFunc(fn func(addr string)) Option {
 	return func(opts *options) {
 		opts.started = fn
+	}
+}
+
+func WithConnectTCPRequestFunc(fn func(req protocol.ConnectTCPRequest)) Option {
+	return func(opts *options) {
+		opts.connectTCPRequest = fn
 	}
 }
 
@@ -58,6 +66,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 			}
 			return err
 		}
-		_ = conn.CloseWithError(0, "not implemented")
+		go handleConnection(ctx, conn, logger, opts)
 	}
 }

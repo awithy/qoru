@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/awithy/qoru/internal/config"
+	"github.com/awithy/qoru/internal/protocol"
 	"github.com/awithy/qoru/internal/server"
 )
 
@@ -24,10 +25,14 @@ func TestRunConnectsToServerWithMTLS(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	started := make(chan string, 1)
+	received := make(chan protocol.ConnectTCPRequest, 1)
 	serverErr := make(chan error, 1)
 
 	go func() {
-		serverErr <- server.Run(ctx, serverCfg, logger, server.WithStartedFunc(func(addr string) { started <- addr }))
+		serverErr <- server.Run(ctx, serverCfg, logger,
+			server.WithStartedFunc(func(addr string) { started <- addr }),
+			server.WithConnectTCPRequestFunc(func(req protocol.ConnectTCPRequest) { received <- req }),
+		)
 	}()
 
 	var addr string
@@ -52,6 +57,15 @@ func TestRunConnectsToServerWithMTLS(t *testing.T) {
 
 	if err := Run(ctx, clientCfg, logger); err != nil {
 		t.Fatalf("expected client to connect: %v", err)
+	}
+
+	select {
+	case req := <-received:
+		if req.Target != "127.0.0.1:5432" {
+			t.Fatalf("expected target 127.0.0.1:5432, got %q", req.Target)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for server to receive connect tcp request")
 	}
 
 	cancel()
