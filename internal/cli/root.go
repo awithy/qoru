@@ -1,10 +1,15 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/awithy/qoru/internal/config"
+	"github.com/awithy/qoru/internal/server"
 	"github.com/spf13/cobra"
 )
 
@@ -12,7 +17,25 @@ type rootOptions struct {
 	configPath string
 }
 
+type runnerFunc func(context.Context, *config.Config, io.Writer) error
+
+type commandRunners struct {
+	client runnerFunc
+	server runnerFunc
+}
+
 func NewRootCommand() *cobra.Command {
+	return newRootCommand(commandRunners{
+		client: runClientPlaceholder,
+		server: runServer,
+	})
+}
+
+func runServer(ctx context.Context, cfg *config.Config, out io.Writer) error {
+	return server.Run(ctx, cfg, out)
+}
+
+func newRootCommand(runners commandRunners) *cobra.Command {
 	opts := &rootOptions{}
 
 	cmd := &cobra.Command{
@@ -25,45 +48,45 @@ func NewRootCommand() *cobra.Command {
 	}
 
 	cmd.PersistentFlags().StringVarP(&opts.configPath, "config", "c", "", "path to qoru config file")
-	cmd.AddCommand(newClientCommand(opts))
-	cmd.AddCommand(newServerCommand(opts))
+	cmd.AddCommand(newClientCommand(opts, runners.client))
+	cmd.AddCommand(newServerCommand(opts, runners.server))
 	cmd.AddCommand(newPrintConfigCommand(opts))
 
 	return cmd
 }
 
-func newClientCommand(opts *rootOptions) *cobra.Command {
+func newClientCommand(opts *rootOptions, runner runnerFunc) *cobra.Command {
 	return &cobra.Command{
 		Use:   "client",
 		Short: "Run in client mode",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, path, err := loadConfig(opts)
+			cfg, _, err := loadConfig(opts)
 			if err != nil {
 				return err
 			}
-			if err := config.ValidateClient(cfg); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "starting client node %s using %s\n", cfg.NodeID, path)
-			return nil
+			return runner(cmd.Context(), cfg, cmd.OutOrStdout())
 		},
 	}
 }
 
-func newServerCommand(opts *rootOptions) *cobra.Command {
+func runClientPlaceholder(_ context.Context, cfg *config.Config, out io.Writer) error {
+	if err := config.ValidateClient(cfg); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "starting client node %s\n", cfg.NodeID)
+	return nil
+}
+
+func newServerCommand(opts *rootOptions, runner runnerFunc) *cobra.Command {
 	return &cobra.Command{
 		Use:   "server",
 		Short: "Run in server mode",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, path, err := loadConfig(opts)
+			cfg, _, err := loadConfig(opts)
 			if err != nil {
 				return err
 			}
-			if err := config.ValidateServer(cfg); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "starting server node %s using %s\n", cfg.NodeID, path)
-			return nil
+			return runner(cmd.Context(), cfg, cmd.OutOrStdout())
 		},
 	}
 }
@@ -104,7 +127,12 @@ func loadConfig(opts *rootOptions) (*config.Config, string, error) {
 
 // Execute runs the root CLI command.
 func Execute() {
-	if err := NewRootCommand().Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	cmd := NewRootCommand()
+	cmd.SetContext(ctx)
+	if err := cmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

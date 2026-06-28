@@ -2,11 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/awithy/qoru/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -63,7 +67,7 @@ tcp_forwards:
 	}
 }
 
-func TestServerCommandLoadsAndValidatesConfig(t *testing.T) {
+func TestServerCommandLoadsConfigAndCallsRunner(t *testing.T) {
 	path := writeTestConfig(t, `node_id: server-1
 mode: server
 identity:
@@ -72,11 +76,23 @@ identity:
   ca: ca.crt
 listen: 127.0.0.1:4433
 `)
-	out, err := executeCommand(NewRootCommand(), "server", "-c", path)
+
+	cmd := newRootCommand(commandRunners{
+		client: runClientPlaceholder,
+		server: func(_ context.Context, cfg *config.Config, out io.Writer) error {
+			if err := config.ValidateServer(cfg); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "server runner called for %s\n", cfg.NodeID)
+			return nil
+		},
+	})
+
+	out, err := executeCommand(cmd, "server", "-c", path)
 	if err != nil {
 		t.Fatalf("expected server command to succeed: %v", err)
 	}
-	if !strings.Contains(out, "starting server node server-1") {
+	if !strings.Contains(out, "server runner called for server-1") {
 		t.Fatalf("unexpected output: %q", out)
 	}
 }

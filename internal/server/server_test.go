@@ -1,0 +1,57 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/awithy/qoru/internal/config"
+)
+
+func TestRunStartsAndStopsQUICServer(t *testing.T) {
+	cfg := &config.Config{
+		NodeID:   "server-1",
+		Mode:     config.ModeServer,
+		Identity: config.IdentityConfig{Cert: "../../dev/certs/server-1.crt", Key: "../../dev/certs/server-1.key", CA: "../../dev/certs/ca.crt"},
+		Listen:   "127.0.0.1:0",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	started := make(chan string, 1)
+	errCh := make(chan error, 1)
+	var out bytes.Buffer
+
+	go func() {
+		errCh <- Run(ctx, cfg, &out, WithStartedFunc(func(addr string) { started <- addr }))
+	}()
+
+	select {
+	case addr := <-started:
+		if !strings.HasPrefix(addr, "127.0.0.1:") {
+			t.Fatalf("expected localhost listen addr, got %q", addr)
+		}
+	case err := <-errCh:
+		t.Fatalf("server exited before starting: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for server to start")
+	}
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for server to stop")
+	}
+
+	if !strings.Contains(out.String(), "server node server-1 listening on 127.0.0.1:") {
+		t.Fatalf("unexpected output: %q", out.String())
+	}
+}
