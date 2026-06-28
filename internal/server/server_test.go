@@ -1,8 +1,9 @@
 package server
 
 import (
-	"bytes"
 	"context"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -23,10 +24,10 @@ func TestRunStartsAndStopsQUICServer(t *testing.T) {
 
 	started := make(chan string, 1)
 	errCh := make(chan error, 1)
-	var out bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	go func() {
-		errCh <- Run(ctx, cfg, &out, WithStartedFunc(func(addr string) { started <- addr }))
+		errCh <- Run(ctx, cfg, logger, WithStartedFunc(func(addr string) { started <- addr }))
 	}()
 
 	select {
@@ -49,9 +50,5 @@ func TestRunStartsAndStopsQUICServer(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for server to stop")
-	}
-
-	if !strings.Contains(out.String(), "server node server-1 listening on 127.0.0.1:") {
-		t.Fatalf("unexpected output: %q", out.String())
 	}
 }

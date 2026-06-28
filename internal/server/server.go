@@ -2,8 +2,7 @@ package server
 
 import (
 	"context"
-	"fmt"
-	"io"
+	"log/slog"
 
 	"github.com/awithy/qoru/internal/config"
 	"github.com/awithy/qoru/internal/identity"
@@ -22,7 +21,7 @@ func WithStartedFunc(fn func(addr string)) Option {
 	}
 }
 
-func Run(ctx context.Context, cfg *config.Config, out io.Writer, runOptions ...Option) error {
+func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOptions ...Option) error {
 	if err := config.ValidateServer(cfg); err != nil {
 		return err
 	}
@@ -44,8 +43,8 @@ func Run(ctx context.Context, cfg *config.Config, out io.Writer, runOptions ...O
 	}
 
 	addr := listener.Addr().String()
-	if out != nil {
-		fmt.Fprintf(out, "server node %s listening on %s\n", cfg.NodeID, addr)
+	if logger != nil {
+		logger.Info("server listening", "node_id", cfg.NodeID, "addr", addr)
 	}
 	if opts.started != nil {
 		opts.started(addr)

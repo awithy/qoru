@@ -3,8 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
-	"fmt"
-	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,7 +61,7 @@ tcp_forwards:
 	if err != nil {
 		t.Fatalf("expected client command to succeed: %v", err)
 	}
-	if !strings.Contains(out, "starting client node client-1") {
+	if !strings.Contains(out, "msg=\"client starting\"") || !strings.Contains(out, "node_id=client-1") {
 		t.Fatalf("unexpected output: %q", out)
 	}
 }
@@ -79,11 +78,11 @@ listen: 127.0.0.1:4433
 
 	cmd := newRootCommand(commandRunners{
 		client: runClientPlaceholder,
-		server: func(_ context.Context, cfg *config.Config, out io.Writer) error {
+		server: func(_ context.Context, cfg *config.Config, logger *slog.Logger) error {
 			if err := config.ValidateServer(cfg); err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "server runner called for %s\n", cfg.NodeID)
+			logger.Info("server runner called", "node_id", cfg.NodeID)
 			return nil
 		},
 	})
@@ -92,7 +91,7 @@ listen: 127.0.0.1:4433
 	if err != nil {
 		t.Fatalf("expected server command to succeed: %v", err)
 	}
-	if !strings.Contains(out, "server runner called for server-1") {
+	if !strings.Contains(out, "msg=\"server runner called\"") || !strings.Contains(out, "node_id=server-1") {
 		t.Fatalf("unexpected output: %q", out)
 	}
 }

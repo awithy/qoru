@@ -3,7 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,7 +17,7 @@ type rootOptions struct {
 	configPath string
 }
 
-type runnerFunc func(context.Context, *config.Config, io.Writer) error
+type runnerFunc func(context.Context, *config.Config, *slog.Logger) error
 
 type commandRunners struct {
 	client runnerFunc
@@ -31,8 +31,8 @@ func NewRootCommand() *cobra.Command {
 	})
 }
 
-func runServer(ctx context.Context, cfg *config.Config, out io.Writer) error {
-	return server.Run(ctx, cfg, out)
+func runServer(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
+	return server.Run(ctx, cfg, logger)
 }
 
 func newRootCommand(runners commandRunners) *cobra.Command {
@@ -64,16 +64,16 @@ func newClientCommand(opts *rootOptions, runner runnerFunc) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runner(cmd.Context(), cfg, cmd.OutOrStdout())
+			return runner(cmd.Context(), cfg, newLogger(cmd))
 		},
 	}
 }
 
-func runClientPlaceholder(_ context.Context, cfg *config.Config, out io.Writer) error {
+func runClientPlaceholder(_ context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if err := config.ValidateClient(cfg); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "starting client node %s\n", cfg.NodeID)
+	logger.Info("client starting", "node_id", cfg.NodeID)
 	return nil
 }
 
@@ -86,7 +86,7 @@ func newServerCommand(opts *rootOptions, runner runnerFunc) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runner(cmd.Context(), cfg, cmd.OutOrStdout())
+			return runner(cmd.Context(), cfg, newLogger(cmd))
 		},
 	}
 }
@@ -111,6 +111,10 @@ func newPrintConfigCommand(opts *rootOptions) *cobra.Command {
 			return err
 		},
 	}
+}
+
+func newLogger(cmd *cobra.Command) *slog.Logger {
+	return slog.New(slog.NewTextHandler(cmd.OutOrStdout(), nil))
 }
 
 func loadConfig(opts *rootOptions) (*config.Config, string, error) {
