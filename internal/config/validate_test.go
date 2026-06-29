@@ -4,10 +4,10 @@ import "testing"
 
 func validClientConfig() Config {
 	return Config{
-		NodeID: "client-1",
-		Mode:   ModeClient,
-		Identity: IdentityConfig{Cert: "client.crt", Key: "client.key", CA: "ca.crt"},
-		Server: &ServerConfig{ID: "server-1", Address: "127.0.0.1:4433"},
+		NodeID:      "client-1",
+		Mode:        ModeClient,
+		Identity:    IdentityConfig{Cert: "client.crt", Key: "client.key", CA: "ca.crt"},
+		Server:      &ServerConfig{ID: "server-1", Address: "127.0.0.1:4433"},
 		TCPForwards: []TCPForwardConfig{{Listen: "127.0.0.1:15432", Target: "127.0.0.1:5432"}},
 	}
 }
@@ -59,19 +59,30 @@ func TestValidateServerRejectsMissingListen(t *testing.T) {
 	}
 }
 
-func TestValidateServerAcceptsAllowedTCPTargets(t *testing.T) {
+func TestValidateServerAcceptsAllowedTargets(t *testing.T) {
 	cfg := validServerConfig()
-	cfg.AllowedTCPTargets = []string{"127.0.0.1:9000", "example.com:443"}
+	cfg.AllowedTargets = []AllowedTargetConfig{
+		{Protocol: "tcp", Address: "127.0.0.1:9000"},
+		{Protocol: "udp", Address: "127.0.0.1:5353"},
+	}
 	if err := ValidateServer(&cfg); err != nil {
 		t.Fatalf("expected valid server config, got %v", err)
 	}
 }
 
-func TestValidateServerRejectsInvalidAllowedTCPTarget(t *testing.T) {
+func TestValidateServerRejectsInvalidAllowedTargetProtocol(t *testing.T) {
 	cfg := validServerConfig()
-	cfg.AllowedTCPTargets = []string{"localhost"}
+	cfg.AllowedTargets = []AllowedTargetConfig{{Protocol: "icmp", Address: "127.0.0.1:9000"}}
 	if err := ValidateServer(&cfg); err == nil {
-		t.Fatal("expected invalid allowed tcp target to be rejected")
+		t.Fatal("expected invalid allowed target protocol to be rejected")
+	}
+}
+
+func TestValidateServerRejectsInvalidAllowedTargetAddress(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.AllowedTargets = []AllowedTargetConfig{{Protocol: "tcp", Address: "localhost"}}
+	if err := ValidateServer(&cfg); err == nil {
+		t.Fatal("expected invalid allowed target address to be rejected")
 	}
 }
 

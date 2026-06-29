@@ -62,12 +62,18 @@ func ValidateServer(cfg *Config) error {
 	if cfg.Listen == "" {
 		return fmt.Errorf("listen is required for server mode")
 	}
-	for i, target := range cfg.AllowedTCPTargets {
-		if target == "" {
-			return fmt.Errorf("allowed_tcp_targets[%d] is required", i)
+	for i, target := range cfg.AllowedTargets {
+		if target.Protocol == "" {
+			return fmt.Errorf("allowed_targets[%d].protocol is required", i)
 		}
-		if _, _, err := net.SplitHostPort(target); err != nil {
-			return fmt.Errorf("allowed_tcp_targets[%d] must be host:port: %w", i, err)
+		if target.Protocol != "tcp" && target.Protocol != "udp" {
+			return fmt.Errorf("allowed_targets[%d].protocol must be tcp or udp", i)
+		}
+		if target.Address == "" {
+			return fmt.Errorf("allowed_targets[%d].address is required", i)
+		}
+		if _, _, err := net.SplitHostPort(target.Address); err != nil {
+			return fmt.Errorf("allowed_targets[%d].address must be host:port: %w", i, err)
 		}
 	}
 	return nil

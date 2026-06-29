@@ -7,12 +7,12 @@ import (
 )
 
 func isTCPTargetAllowed(cfg *config.Config, target string) bool {
-	if len(cfg.AllowedTCPTargets) == 0 {
+	if len(cfg.AllowedTargets) == 0 {
 		return true
 	}
 
-	for _, allowed := range cfg.AllowedTCPTargets {
-		if target == allowed {
+	for _, allowed := range cfg.AllowedTargets {
+		if allowed.Protocol == "tcp" && target == allowed.Address {
 			return true
 		}
 	}

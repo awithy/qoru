@@ -105,8 +105,9 @@ identity:
   key: ./dev/certs/server-1.key
   ca: ./dev/certs/ca.crt
 listen: $SERVER_ADDR
-allowed_tcp_targets:
-  - $TARGET_ADDR
+allowed_targets:
+  - protocol: tcp
+    address: $TARGET_ADDR
 EOF
 
 cat >"$tmpdir/client.yaml" <<EOF

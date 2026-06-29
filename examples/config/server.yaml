@@ -9,5 +9,6 @@ identity:
 listen: 127.0.0.1:4433
 
 # Optional. If omitted or empty, any syntactically valid TCP target is allowed.
-# allowed_tcp_targets:
-#   - 127.0.0.1:9000
+# allowed_targets:
+#   - protocol: tcp
+#     address: 127.0.0.1:9000

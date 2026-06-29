@@ -175,7 +175,7 @@ func TestOpenTCPStreamReturnsTargetPolicyError(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	serverCfg := testServerConfig()
-	serverCfg.AllowedTCPTargets = []string{"127.0.0.1:9000"}
+	serverCfg.AllowedTargets = []config.AllowedTargetConfig{{Protocol: "tcp", Address: "127.0.0.1:9000"}}
 	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, nil)
 	clientCfg := testClientConfig(addr, "127.0.0.1:9001")
 

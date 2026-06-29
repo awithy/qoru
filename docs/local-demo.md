@@ -14,7 +14,7 @@ Run the local demo as a single smoke test:
 make demo-e2e
 ```
 
-This starts an echo target, qoru server, and qoru client; sends a test payload through the local client listener; verifies the echoed response; then cleans up. The generated temporary server config includes `allowed_tcp_targets` for the echo target.
+This starts an echo target, qoru server, and qoru client; sends a test payload through the local client listener; verifies the echoed response; then cleans up. The generated temporary server config includes `allowed_targets` for the echo target.
 
 By default, the script chooses free local ports. Addresses can be overridden with `QORU_DEMO_SERVER_ADDR`, `QORU_DEMO_CLIENT_ADDR`, and `QORU_DEMO_TARGET_ADDR`.
 
@@ -90,4 +90,4 @@ hello
 - The client and server use QUIC with mTLS.
 - The dev certs are generated under `dev/certs/` and are ignored by git.
 - The current implementation is one-hop only.
-- Server-side target policy is target-only today. The automated demo enables `allowed_tcp_targets` for the echo target.
+- Server-side target policy is target-only today. The automated demo enables `allowed_targets` for the echo target.
