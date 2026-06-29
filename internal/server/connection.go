@@ -3,11 +3,13 @@ package server
 import (
 	"context"
 	"log/slog"
-	"net"
+	"time"
 
 	"github.com/awithy/qoru/internal/protocol"
 	"github.com/quic-go/quic-go"
 )
+
+const defaultTCPDialTimeout = 10 * time.Second
 
 func handleConnection(ctx context.Context, conn *quic.Conn, logger *slog.Logger, opts options) {
 	defer conn.CloseWithError(0, "done")
@@ -20,11 +22,11 @@ func handleConnection(ctx context.Context, conn *quic.Conn, logger *slog.Logger,
 			}
 			return
 		}
-		go handleStream(stream, logger, opts)
+		go handleStream(ctx, stream, logger, opts)
 	}
 }
 
-func handleStream(stream *quic.Stream, logger *slog.Logger, opts options) {
+func handleStream(ctx context.Context, stream *quic.Stream, logger *slog.Logger, opts options) {
 	req, err := protocol.ReadConnectTCPRequest(stream)
 	if err != nil {
 		if logger != nil {
@@ -41,7 +43,7 @@ func handleStream(stream *quic.Stream, logger *slog.Logger, opts options) {
 		opts.connectTCPRequest(req)
 	}
 
-	targetConn, err := net.Dial("tcp", req.Target)
+	targetConn, err := dialTCP(ctx, req.Target)
 	if err != nil {
 		if logger != nil {
 			logger.Error("tcp target dial failed", "target", req.Target, "error", err)

@@ -4,12 +4,15 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"time"
 
 	"github.com/awithy/qoru/internal/config"
 	"github.com/awithy/qoru/internal/identity"
 	"github.com/awithy/qoru/internal/protocol"
 	"github.com/quic-go/quic-go"
 )
+
+const defaultQUICDialTimeout = 10 * time.Second
 
 type options struct {
 	started func(addr string)
@@ -130,7 +133,10 @@ func Connect(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*qui
 		return nil, err
 	}
 
-	conn, err := quic.DialAddr(ctx, cfg.Server.Address, tlsConfig, &quic.Config{})
+	dialCtx, cancel := context.WithTimeout(ctx, defaultQUICDialTimeout)
+	defer cancel()
+
+	conn, err := quic.DialAddr(dialCtx, cfg.Server.Address, tlsConfig, &quic.Config{})
 	if err != nil {
 		return nil, err
 	}
