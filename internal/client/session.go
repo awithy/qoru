@@ -16,17 +16,92 @@ type upstreamSession interface {
 	Close(reason string)
 }
 
+type upstreamSessions struct {
+	sessions  map[string]*reconnectingUpstreamSession
+	defaultID string
+}
+
+func newUpstreamSessions(cfg *config.Config, logger *slog.Logger) (*upstreamSessions, error) {
+	servers, err := configuredServers(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	sessions := make(map[string]*reconnectingUpstreamSession, len(servers))
+	var defaultID string
+	for _, server := range servers {
+		sessions[server.ID] = newReconnectingUpstreamSession(cfg.NodeID, cfg.Identity, server, logger)
+		defaultID = server.ID
+	}
+	if len(sessions) != 1 {
+		defaultID = ""
+	}
+
+	return &upstreamSessions{sessions: sessions, defaultID: defaultID}, nil
+}
+
+func configuredServers(cfg *config.Config) ([]*config.ServerConfig, error) {
+	if len(cfg.Servers) == 0 {
+		return nil, fmt.Errorf("at least one servers entry is required for client mode")
+	}
+	servers := make([]*config.ServerConfig, 0, len(cfg.Servers))
+	for i := range cfg.Servers {
+		servers = append(servers, &cfg.Servers[i])
+	}
+	return servers, nil
+}
+
+func (s *upstreamSessions) ConnectAll(ctx context.Context) error {
+	for id, session := range s.sessions {
+		if _, err := session.connection(ctx); err != nil {
+			return fmt.Errorf("connect upstream %q: %w", id, err)
+		}
+	}
+	return nil
+}
+
+func (s *upstreamSessions) OpenTCPStream(ctx context.Context, service, egress string) (*quic.Stream, error) {
+	session, selectedEgress, err := s.selectSession(egress)
+	if err != nil {
+		return nil, err
+	}
+	return session.OpenTCPStream(ctx, service, selectedEgress)
+}
+
+func (s *upstreamSessions) Close(reason string) {
+	for _, session := range s.sessions {
+		session.Close(reason)
+	}
+}
+
+func (s *upstreamSessions) selectSession(egress string) (*reconnectingUpstreamSession, string, error) {
+	if egress == "" {
+		if s.defaultID == "" {
+			return nil, "", fmt.Errorf("egress is required when multiple servers are configured")
+		}
+		return s.sessions[s.defaultID], "", nil
+	}
+
+	session, ok := s.sessions[egress]
+	if !ok {
+		return nil, "", fmt.Errorf("egress %q does not match a configured server", egress)
+	}
+	return session, egress, nil
+}
+
 type reconnectingUpstreamSession struct {
-	cfg    *config.Config
-	logger *slog.Logger
+	nodeID   string
+	identity config.IdentityConfig
+	server   *config.ServerConfig
+	logger   *slog.Logger
 
 	mu     sync.Mutex
 	conn   *quic.Conn
 	closed bool
 }
 
-func newReconnectingUpstreamSession(cfg *config.Config, logger *slog.Logger) *reconnectingUpstreamSession {
-	return &reconnectingUpstreamSession{cfg: cfg, logger: logger}
+func newReconnectingUpstreamSession(nodeID string, identity config.IdentityConfig, server *config.ServerConfig, logger *slog.Logger) *reconnectingUpstreamSession {
+	return &reconnectingUpstreamSession{nodeID: nodeID, identity: identity, server: server, logger: logger}
 }
 
 func (s *reconnectingUpstreamSession) OpenTCPStream(ctx context.Context, service, egress string) (*quic.Stream, error) {
@@ -76,7 +151,7 @@ func (s *reconnectingUpstreamSession) connection(ctx context.Context) (*quic.Con
 		s.conn = nil
 	}
 
-	conn, err := Connect(ctx, s.cfg, s.logger)
+	conn, err := ConnectToServer(ctx, s.nodeID, s.identity, *s.server, s.logger)
 	if err != nil {
 		return nil, err
 	}

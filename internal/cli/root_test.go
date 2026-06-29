@@ -50,9 +50,9 @@ identity:
   cert: client.crt
   key: client.key
   ca: ca.crt
-server:
-  id: server-1
-  address: 127.0.0.1:4433
+servers:
+  - id: server-1
+    address: 127.0.0.1:4433
 forwards:
   - protocol: tcp
     listen: 127.0.0.1:15432

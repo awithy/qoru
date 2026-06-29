@@ -17,7 +17,8 @@ TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
 - QUIC transport using `quic-go`.
 - mTLS peer authentication with a configured private CA.
 - Custom binary control protocol.
-- One upstream QUIC connection shared by client-side TCP forwards.
+- One reconnecting upstream QUIC connection per configured client-side server.
+- Multiple direct upstream servers selected by forward `egress`.
 - On-demand upstream reconnect for new local TCP connections after a QUIC connection loss.
 - One QUIC stream per proxied TCP connection.
 - Multiple local TCP forwards.
@@ -120,15 +121,25 @@ identity:
   key: ./dev/certs/client-1.key
   ca: ./dev/certs/ca.crt
 
-server:
-  id: server-1
-  address: 127.0.0.1:4433
+servers:
+  - id: server-1
+    address: 127.0.0.1:4433
 
 forwards:
   - protocol: tcp
     listen: 127.0.0.1:15432
     service: echo
     egress: server-1
+```
+
+A client can configure multiple direct upstream servers. In that case each forward must set `egress` to a configured server ID:
+
+```yaml
+servers:
+  - id: server-1
+    address: 127.0.0.1:4433
+  - id: server-2
+    address: 127.0.0.1:4434
 ```
 
 Server:

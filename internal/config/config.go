@@ -20,8 +20,8 @@ type Config struct {
 
 	Identity IdentityConfig `yaml:"identity"`
 
-	Server *ServerConfig `yaml:"server,omitempty"`
-	Listen string        `yaml:"listen,omitempty"`
+	Servers []ServerConfig `yaml:"servers,omitempty"`
+	Listen  string         `yaml:"listen,omitempty"`
 
 	Forwards []ForwardConfig `yaml:"forwards,omitempty"`
 	Services []ServiceConfig `yaml:"services,omitempty"`

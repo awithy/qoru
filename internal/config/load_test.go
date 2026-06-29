@@ -15,9 +15,9 @@ identity:
   cert: client.crt
   key: client.key
   ca: ca.crt
-server:
-  id: server-1
-  address: 127.0.0.1:4433
+servers:
+  - id: server-1
+    address: 127.0.0.1:4433
 forwards:
   - protocol: tcp
     listen: 127.0.0.1:15432
@@ -32,7 +32,7 @@ forwards:
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if cfg.NodeID != "client-1" || cfg.Server == nil || len(cfg.Forwards) != 1 || cfg.Forwards[0].Service != "echo" {
+	if cfg.NodeID != "client-1" || len(cfg.Servers) != 1 || len(cfg.Forwards) != 1 || cfg.Forwards[0].Service != "echo" {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 }

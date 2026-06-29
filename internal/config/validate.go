@@ -28,14 +28,9 @@ func ValidateClient(cfg *Config) error {
 	if cfg.Mode != ModeClient {
 		return fmt.Errorf("config mode %q cannot be used with client command", cfg.Mode)
 	}
-	if cfg.Server == nil {
-		return fmt.Errorf("server is required for client mode")
-	}
-	if cfg.Server.ID == "" {
-		return fmt.Errorf("server.id is required for client mode")
-	}
-	if cfg.Server.Address == "" {
-		return fmt.Errorf("server.address is required for client mode")
+	servers, err := validateClientServers(cfg)
+	if err != nil {
+		return err
 	}
 	if len(cfg.Forwards) == 0 {
 		return fmt.Errorf("at least one forwards entry is required for client mode")
@@ -56,8 +51,40 @@ func ValidateClient(cfg *Config) error {
 		if fwd.Service == "" {
 			return fmt.Errorf("forwards[%d].service is required", i)
 		}
+		if len(servers) > 1 {
+			if fwd.Egress == "" {
+				return fmt.Errorf("forwards[%d].egress is required when multiple servers are configured", i)
+			}
+			if _, ok := servers[fwd.Egress]; !ok {
+				return fmt.Errorf("forwards[%d].egress %q does not match a configured server", i, fwd.Egress)
+			}
+		} else if fwd.Egress != "" {
+			if _, ok := servers[fwd.Egress]; !ok {
+				return fmt.Errorf("forwards[%d].egress %q does not match the configured server", i, fwd.Egress)
+			}
+		}
 	}
 	return nil
+}
+
+func validateClientServers(cfg *Config) (map[string]ServerConfig, error) {
+	servers := make(map[string]ServerConfig)
+	if len(cfg.Servers) == 0 {
+		return nil, fmt.Errorf("at least one servers entry is required for client mode")
+	}
+	for i, server := range cfg.Servers {
+		if server.ID == "" {
+			return nil, fmt.Errorf("servers[%d].id is required for client mode", i)
+		}
+		if server.Address == "" {
+			return nil, fmt.Errorf("servers[%d].address is required for client mode", i)
+		}
+		if _, exists := servers[server.ID]; exists {
+			return nil, fmt.Errorf("servers[%d].id %q is duplicated", i, server.ID)
+		}
+		servers[server.ID] = server
+	}
+	return servers, nil
 }
 
 func ValidateServer(cfg *Config) error {

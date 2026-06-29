@@ -6,6 +6,9 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -28,7 +31,7 @@ func TestRunListensAndProxiesLocalTCP(t *testing.T) {
 
 	clientCtx, clientCancel := context.WithCancel(context.Background())
 	defer clientCancel()
-	clientCfg := testClientConfig(addr, targetListener.Addr().String())
+	clientCfg := testClientConfig(addr)
 	clientCfg.Forwards[0].Listen = "127.0.0.1:0"
 
 	clientStarted := make(chan string, 1)
@@ -91,7 +94,7 @@ func TestRunListensOnMultipleForwards(t *testing.T) {
 
 	clientCtx, clientCancel := context.WithCancel(context.Background())
 	defer clientCancel()
-	clientCfg := testClientConfig(addr, targetA.Addr().String())
+	clientCfg := testClientConfig(addr)
 	clientCfg.Forwards = []config.ForwardConfig{
 		{Protocol: "tcp", Listen: "127.0.0.1:0", Service: "echo-a"},
 		{Protocol: "tcp", Listen: "127.0.0.1:0", Service: "echo-b"},
@@ -121,6 +124,65 @@ func TestRunListensOnMultipleForwards(t *testing.T) {
 	cancelAndWaitForServer(t, serverCancel, serverErr)
 }
 
+func TestRunRoutesForwardsToMultipleServersByEgress(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	targetA := startFixedTCPServer(t, "aaaa")
+	targetB := startFixedTCPServer(t, "bbbb")
+
+	serverCfgA := testServerConfig()
+	serverCfgA.NodeID = "server-1"
+	serverCfgA.Services = []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: targetA.Addr().String(), Peers: []string{"client-1"}}}
+	addrA, serverErrA := startTestServerWithConfig(t, ctx, logger, serverCfgA, nil)
+
+	serverCfgB := testServerConfig()
+	serverCfgB.NodeID = "server-2"
+	serverCfgB.Identity = makeDevNodeCert(t, "server-2")
+	serverCfgB.Services = []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: targetB.Addr().String(), Peers: []string{"client-1"}}}
+	addrB, serverErrB := startTestServerWithConfig(t, ctx, logger, serverCfgB, nil)
+
+	clientCtx, clientCancel := context.WithCancel(context.Background())
+	defer clientCancel()
+	clientCfg := testClientConfig(addrA)
+	clientCfg.Servers = []config.ServerConfig{{ID: "server-1", Address: addrA}, {ID: "server-2", Address: addrB}}
+	clientCfg.Forwards = []config.ForwardConfig{
+		{Protocol: "tcp", Listen: "127.0.0.1:0", Service: "echo", Egress: "server-1"},
+		{Protocol: "tcp", Listen: "127.0.0.1:0", Service: "echo", Egress: "server-2"},
+	}
+
+	started := make(chan string, 2)
+	clientErr := make(chan error, 1)
+	go func() {
+		clientErr <- Run(clientCtx, clientCfg, logger, WithStartedFunc(func(addr string) { started <- addr }))
+	}()
+
+	clientAddrA := waitForClientAddr(t, started, clientErr)
+	clientAddrB := waitForClientAddr(t, started, clientErr)
+	assertRead(t, clientAddrA, "aaaa")
+	assertRead(t, clientAddrB, "bbbb")
+
+	clientCancel()
+	select {
+	case err := <-clientErr:
+		if err != nil {
+			t.Fatalf("expected clean client shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for client shutdown")
+	}
+	cancelAndWaitForServer(t, cancel, serverErrA)
+	select {
+	case err := <-serverErrB:
+		if err != nil {
+			t.Fatalf("expected clean server B shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for server B shutdown")
+	}
+}
+
 func TestRunReconnectsForNewLocalTCPConnections(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	targetListener := startEchoTCPServerLoop(t)
@@ -133,7 +195,7 @@ func TestRunReconnectsForNewLocalTCPConnections(t *testing.T) {
 
 	clientCtx, clientCancel := context.WithCancel(context.Background())
 	defer clientCancel()
-	clientCfg := testClientConfig(addr, targetListener.Addr().String())
+	clientCfg := testClientConfig(addr)
 	clientCfg.Forwards[0].Listen = "127.0.0.1:0"
 
 	clientStarted := make(chan string, 1)
@@ -150,7 +212,7 @@ func TestRunReconnectsForNewLocalTCPConnections(t *testing.T) {
 	serverCtx2, serverCancel2 := context.WithCancel(context.Background())
 	defer serverCancel2()
 	addr2, serverErr2 := startTestServerWithConfig(t, serverCtx2, logger, serverCfg, nil)
-	clientCfg.Server.Address = addr2
+	clientCfg.Servers[0].Address = addr2
 
 	assertEcho(t, clientAddr, "two!")
 
@@ -179,7 +241,7 @@ func TestMultipleStreamsOnOneQUICConnection(t *testing.T) {
 		{Name: "echo-b", Protocol: "tcp", Target: targetB.Addr().String(), Peers: []string{"client-1"}},
 	}
 	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, nil)
-	clientCfg := testClientConfig(addr, targetA.Addr().String())
+	clientCfg := testClientConfig(addr)
 
 	conn, err := Connect(ctx, clientCfg, logger)
 	if err != nil {
@@ -210,7 +272,7 @@ func TestOpenTCPStreamReturnsTargetDialError(t *testing.T) {
 	serverCfg := testServerConfig()
 	serverCfg.Services = []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: "127.0.0.1:1", Peers: []string{"client-1"}}}
 	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, nil)
-	clientCfg := testClientConfig(addr, "127.0.0.1:1")
+	clientCfg := testClientConfig(addr)
 
 	conn, err := Connect(ctx, clientCfg, logger)
 	if err != nil {
@@ -242,7 +304,7 @@ func TestOpenTCPStreamReturnsEgressError(t *testing.T) {
 	serverCfg := testServerConfig()
 	serverCfg.Services = []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: target.Addr().String(), Peers: []string{"client-1"}}}
 	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, nil)
-	clientCfg := testClientConfig(addr, target.Addr().String())
+	clientCfg := testClientConfig(addr)
 
 	conn, err := Connect(ctx, clientCfg, logger)
 	if err != nil {
@@ -273,7 +335,7 @@ func TestOpenTCPStreamReturnsTargetPolicyError(t *testing.T) {
 	serverCfg := testServerConfig()
 	serverCfg.Services = []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: "127.0.0.1:9000", Peers: []string{"client-2"}}}
 	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, nil)
-	clientCfg := testClientConfig(addr, "127.0.0.1:9001")
+	clientCfg := testClientConfig(addr)
 
 	conn, err := Connect(ctx, clientCfg, logger)
 	if err != nil {
@@ -307,7 +369,7 @@ func TestConnectTCPProxiesBytesToTarget(t *testing.T) {
 	serverCfg.Services = []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: targetListener.Addr().String(), Peers: []string{"client-1"}}}
 	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, func(req protocol.ConnectRequest) { received <- req })
 
-	clientCfg := testClientConfig(addr, targetListener.Addr().String())
+	clientCfg := testClientConfig(addr)
 	conn, stream, err := ConnectTCP(ctx, clientCfg, "echo", "", logger)
 	if err != nil {
 		t.Fatalf("expected client to connect: %v", err)
@@ -368,6 +430,23 @@ func assertStreamEcho(t *testing.T, stream *quic.Stream, msg string) {
 	}
 }
 
+func assertRead(t *testing.T, addr, want string) {
+	t.Helper()
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial client listener: %v", err)
+	}
+	defer conn.Close()
+
+	buf := make([]byte, len(want))
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		t.Fatalf("read from local connection: %v", err)
+	}
+	if string(buf) != want {
+		t.Fatalf("expected %q, got %q", want, string(buf))
+	}
+}
+
 func assertEcho(t *testing.T, addr, msg string) {
 	t.Helper()
 	conn, err := net.Dial("tcp", addr)
@@ -421,6 +500,64 @@ func startTestServerWithConfig(t *testing.T, ctx context.Context, logger *slog.L
 	panic("unreachable")
 }
 
+func makeDevNodeCert(t *testing.T, nodeID string) config.IdentityConfig {
+	t.Helper()
+	dir := t.TempDir()
+	cert := filepath.Join(dir, nodeID+".crt")
+	key := filepath.Join(dir, nodeID+".key")
+	cnf := filepath.Join(dir, nodeID+".cnf")
+	csr := filepath.Join(dir, nodeID+".csr")
+	cfg := "[req]\n" +
+		"distinguished_name = req_distinguished_name\n" +
+		"req_extensions = v3_req\n" +
+		"prompt = no\n" +
+		"[req_distinguished_name]\n" +
+		"CN = " + nodeID + "\n" +
+		"[v3_req]\n" +
+		"basicConstraints = CA:FALSE\n" +
+		"keyUsage = critical,digitalSignature,keyEncipherment\n" +
+		"extendedKeyUsage = serverAuth,clientAuth\n" +
+		"subjectAltName = URI:spiffe://qoru/node/" + nodeID + "\n"
+	if err := os.WriteFile(cnf, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runOpenSSL(t, "genrsa", "-out", key, "2048")
+	runOpenSSL(t, "req", "-new", "-key", key, "-out", csr, "-config", cnf)
+	runOpenSSL(t, "x509", "-req", "-in", csr, "-CA", "../../dev/certs/ca.crt", "-CAkey", "../../dev/certs/ca.key", "-CAcreateserial", "-out", cert, "-days", "365", "-sha256", "-extensions", "v3_req", "-extfile", cnf)
+	return config.IdentityConfig{Cert: cert, Key: key, CA: "../../dev/certs/ca.crt"}
+}
+
+func runOpenSSL(t *testing.T, args ...string) {
+	t.Helper()
+	out, err := exec.Command("openssl", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("openssl %v failed: %v\n%s", args, err, out)
+	}
+}
+
+func startFixedTCPServer(t *testing.T, response string) net.Listener {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				_, _ = conn.Write([]byte(response))
+			}()
+		}
+	}()
+	return listener
+}
+
 func startEchoTCPServerLoop(t *testing.T) net.Listener {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -463,12 +600,12 @@ func startEchoTCPServer(t *testing.T) net.Listener {
 	return listener
 }
 
-func testClientConfig(serverAddr, targetAddr string) *config.Config {
+func testClientConfig(serverAddr string) *config.Config {
 	return &config.Config{
 		NodeID:   "client-1",
 		Mode:     config.ModeClient,
 		Identity: config.IdentityConfig{Cert: "../../dev/certs/client-1.crt", Key: "../../dev/certs/client-1.key", CA: "../../dev/certs/ca.crt"},
-		Server:   &config.ServerConfig{ID: "server-1", Address: serverAddr},
+		Servers:  []config.ServerConfig{{ID: "server-1", Address: serverAddr}},
 		Forwards: []config.ForwardConfig{{
 			Protocol: "tcp",
 			Listen:   "127.0.0.1:15432",

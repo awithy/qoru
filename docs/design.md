@@ -8,7 +8,7 @@
 TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
 ```
 
-The long-term direction is a chainable relay overlay with optional multi-hop forwarding and end-to-end payload encryption. The current code is intentionally smaller: static config, one configured server, TCP forwarding, QUIC transport, and mTLS authentication.
+The long-term direction is a chainable relay overlay with optional multi-hop forwarding and end-to-end payload encryption. The current code is intentionally smaller: static config, one or more configured direct upstream servers, TCP forwarding, QUIC transport, and mTLS authentication.
 
 ## Current Capabilities
 
@@ -21,7 +21,8 @@ Implemented today:
 - QUIC transport using `quic-go`.
 - Custom binary control protocol.
 - Client-side local TCP listeners from `forwards`.
-- One shared upstream QUIC connection from client to server.
+- One reconnecting upstream QUIC connection per configured client-side server.
+- Multiple configured direct upstream servers selected by forward `egress`.
 - On-demand upstream reconnect for new local TCP connections after connection loss.
 - One QUIC stream per proxied local TCP connection.
 - Multiple local TCP forwards.
@@ -102,9 +103,9 @@ identity:
   key: ./dev/certs/client-1.key
   ca: ./dev/certs/ca.crt
 
-server:
-  id: server-1
-  address: 127.0.0.1:4433
+servers:
+  - id: server-1
+    address: 127.0.0.1:4433
 
 forwards:
   - protocol: tcp
@@ -113,7 +114,27 @@ forwards:
     egress: server-1
 ```
 
-The client requests a named service. Service names are currently resolved on the connected server. `egress` is optional today; empty means the connected server may satisfy the request. If set in the current one-hop implementation, it must match the connected server's `node_id`.
+The client requests a named service. Service names are currently resolved on the selected direct upstream server. `egress` is optional when exactly one upstream server is configured; empty means that server may satisfy the request. When multiple upstream servers are configured, each forward must set `egress` to one configured server ID. In the current one-hop implementation, the selected server also requires any non-empty request `egress` to match its own `node_id`.
+
+A client may configure multiple direct upstream servers:
+
+```yaml
+servers:
+  - id: server-1
+    address: 127.0.0.1:4433
+  - id: server-2
+    address: 127.0.0.1:4434
+
+forwards:
+  - protocol: tcp
+    listen: 127.0.0.1:15432
+    service: echo
+    egress: server-1
+  - protocol: tcp
+    listen: 127.0.0.1:15433
+    service: echo
+    egress: server-2
+```
 
 ### Server config
 
@@ -149,10 +170,10 @@ Shared required fields:
 Client required fields:
 
 - `mode: client`
-- `server.id`
-- `server.address`
+- at least one `servers` entry
+- each `servers[]` entry requires `id` and `address`
 - at least one `forwards` entry
-- each forward requires `protocol: tcp`, `listen`, and `service`; `egress` is optional
+- each forward requires `protocol: tcp`, `listen`, and `service`; `egress` is optional with one upstream server and required with multiple upstream servers
 
 Server required fields:
 
@@ -292,16 +313,16 @@ The current client runtime lives in `internal/client`.
 `client.Run` currently:
 
 1. validates client config
-2. establishes one QUIC/mTLS connection to the configured server
+2. establishes one QUIC/mTLS connection to each configured upstream server
 3. binds one local TCP listener per configured `forwards` entry
 4. starts accept loops for all listeners
-5. for each local TCP connection, opens a new QUIC stream through a reconnecting upstream session
+5. for each local TCP connection, selects an upstream session by forward `egress` and opens a new QUIC stream
 6. sends `ConnectRequest{Protocol: "tcp", Service: "...", Egress: "..."}`
 7. waits for `ConnectResponse`
 8. proxies bytes between the local TCP connection and QUIC stream
 9. exits cleanly when the context is canceled
 10. keeps local listeners running if the upstream QUIC connection later fails
-11. reconnects on demand when a later local TCP connection needs a new stream
+11. reconnects the selected upstream on demand when a later local TCP connection needs a new stream
 
 Useful lower-level helpers:
 

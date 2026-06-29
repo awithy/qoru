@@ -3,7 +3,7 @@ package config
 import "testing"
 
 func validClientConfig() Config {
-	return Config{NodeID: "client-1", Mode: ModeClient, Identity: IdentityConfig{Cert: "client.crt", Key: "client.key", CA: "ca.crt"}, Server: &ServerConfig{ID: "server-1", Address: "127.0.0.1:4433"}, Forwards: []ForwardConfig{{Protocol: "tcp", Listen: "127.0.0.1:15432", Service: "echo"}}}
+	return Config{NodeID: "client-1", Mode: ModeClient, Identity: IdentityConfig{Cert: "client.crt", Key: "client.key", CA: "ca.crt"}, Servers: []ServerConfig{{ID: "server-1", Address: "127.0.0.1:4433"}}, Forwards: []ForwardConfig{{Protocol: "tcp", Listen: "127.0.0.1:15432", Service: "echo"}}}
 }
 
 func validServerConfig() Config {
@@ -23,6 +23,32 @@ func TestValidateClientRejectsWrongMode(t *testing.T) {
 		t.Fatal("expected wrong mode to be rejected")
 	}
 }
+func TestValidateClientRejectsDuplicateServers(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Servers = []ServerConfig{{ID: "server-1", Address: "127.0.0.1:4433"}, {ID: "server-1", Address: "127.0.0.1:4434"}}
+	cfg.Forwards[0].Egress = "server-1"
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected duplicate servers to be rejected")
+	}
+}
+
+func TestValidateClientRejectsMissingEgressWithMultipleServers(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Servers = []ServerConfig{{ID: "server-1", Address: "127.0.0.1:4433"}, {ID: "server-2", Address: "127.0.0.1:4434"}}
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected missing egress with multiple servers to be rejected")
+	}
+}
+
+func TestValidateClientRejectsUnknownEgress(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Servers = []ServerConfig{{ID: "server-1", Address: "127.0.0.1:4433"}, {ID: "server-2", Address: "127.0.0.1:4434"}}
+	cfg.Forwards[0].Egress = "server-3"
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected unknown egress to be rejected")
+	}
+}
+
 func TestValidateClientRejectsMissingForward(t *testing.T) {
 	cfg := validClientConfig()
 	cfg.Forwards = nil

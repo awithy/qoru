@@ -58,8 +58,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 		apply(&opts)
 	}
 
-	session := newReconnectingUpstreamSession(cfg, logger)
-	if _, err := session.connection(ctx); err != nil {
+	session, err := newUpstreamSessions(cfg, logger)
+	if err != nil {
+		return err
+	}
+	if err := session.ConnectAll(ctx); err != nil {
 		return err
 	}
 
@@ -182,8 +185,14 @@ func Connect(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*qui
 	if err := config.ValidateClient(cfg); err != nil {
 		return nil, err
 	}
+	if len(cfg.Servers) != 1 {
+		return nil, fmt.Errorf("Connect requires exactly one configured server")
+	}
+	return ConnectToServer(ctx, cfg.NodeID, cfg.Identity, cfg.Servers[0], logger)
+}
 
-	tlsConfig, err := identity.ClientTLSConfig(cfg.Identity, cfg.Server.ID)
+func ConnectToServer(ctx context.Context, nodeID string, identityCfg config.IdentityConfig, serverCfg config.ServerConfig, logger *slog.Logger) (*quic.Conn, error) {
+	tlsConfig, err := identity.ClientTLSConfig(identityCfg, serverCfg.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -191,13 +200,13 @@ func Connect(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*qui
 	dialCtx, cancel := context.WithTimeout(ctx, defaultQUICDialTimeout)
 	defer cancel()
 
-	conn, err := quic.DialAddr(dialCtx, cfg.Server.Address, tlsConfig, &quic.Config{})
+	conn, err := quic.DialAddr(dialCtx, serverCfg.Address, tlsConfig, &quic.Config{})
 	if err != nil {
 		return nil, err
 	}
 
 	if logger != nil {
-		logger.Info("client connected", "node_id", cfg.NodeID, "server_id", cfg.Server.ID, "addr", cfg.Server.Address)
+		logger.Info("client connected", "node_id", nodeID, "server_id", serverCfg.ID, "addr", serverCfg.Address)
 	}
 
 	return conn, nil

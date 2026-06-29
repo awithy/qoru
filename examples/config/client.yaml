@@ -6,9 +6,9 @@ identity:
   key: ./dev/certs/client-1.key
   ca: ./dev/certs/ca.crt
 
-server:
-  id: server-1
-  address: 127.0.0.1:4433
+servers:
+  - id: server-1
+    address: 127.0.0.1:4433
 
 forwards:
   - protocol: tcp

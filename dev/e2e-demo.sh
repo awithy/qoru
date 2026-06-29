@@ -120,9 +120,9 @@ identity:
   cert: ./dev/certs/client-1.crt
   key: ./dev/certs/client-1.key
   ca: ./dev/certs/ca.crt
-server:
-  id: server-1
-  address: $SERVER_ADDR
+servers:
+  - id: server-1
+    address: $SERVER_ADDR
 forwards:
   - protocol: tcp
     listen: $CLIENT_ADDR

@@ -49,10 +49,10 @@ func TestConfigShape(t *testing.T) {
 			Key:  "client.key",
 			CA:   "ca.crt",
 		},
-		Server: &ServerConfig{
+		Servers: []ServerConfig{{
 			ID:      "server-1",
 			Address: "127.0.0.1:4433",
-		},
+		}},
 		Forwards: []ForwardConfig{{
 			Protocol: "tcp",
 			Listen:   "127.0.0.1:15432",
@@ -64,8 +64,8 @@ func TestConfigShape(t *testing.T) {
 	if cfg.NodeID != "client-1" || cfg.Mode != ModeClient {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
-	if cfg.Server == nil || cfg.Server.Address != "127.0.0.1:4433" {
-		t.Fatalf("unexpected server config: %#v", cfg.Server)
+	if len(cfg.Servers) != 1 || cfg.Servers[0].Address != "127.0.0.1:4433" {
+		t.Fatalf("unexpected servers config: %#v", cfg.Servers)
 	}
 	if len(cfg.Forwards) != 1 || cfg.Forwards[0].Service != "echo" {
 		t.Fatalf("unexpected forwards: %#v", cfg.Forwards)
