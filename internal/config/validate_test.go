@@ -49,6 +49,49 @@ func TestValidateClientRejectsUnknownEgress(t *testing.T) {
 	}
 }
 
+func TestValidateClientAcceptsOneHopRoute(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Forwards[0].Egress = "server-1"
+	cfg.Forwards[0].Route = []string{"server-1"}
+	if err := ValidateClient(&cfg); err != nil {
+		t.Fatalf("expected one-hop route to be accepted, got %v", err)
+	}
+}
+
+func TestValidateClientRejectsEmptyRouteHop(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Forwards[0].Route = []string{""}
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected empty route hop to be rejected")
+	}
+}
+
+func TestValidateClientRejectsUnknownFirstRouteHop(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Forwards[0].Route = []string{"server-2"}
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected unknown first route hop to be rejected")
+	}
+}
+
+func TestValidateClientRejectsEgressRouteMismatch(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Servers = []ServerConfig{{ID: "server-1", Address: "127.0.0.1:4433"}, {ID: "server-2", Address: "127.0.0.1:4434"}}
+	cfg.Forwards[0].Egress = "server-2"
+	cfg.Forwards[0].Route = []string{"server-1"}
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected egress/route mismatch to be rejected")
+	}
+}
+
+func TestValidateClientRejectsMultiHopRouteForNow(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Forwards[0].Route = []string{"server-1", "server-2"}
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected multi-hop route to be rejected until implemented")
+	}
+}
+
 func TestValidateClientRejectsMissingForward(t *testing.T) {
 	cfg := validClientConfig()
 	cfg.Forwards = nil

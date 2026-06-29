@@ -5,6 +5,8 @@ import (
 	"net"
 )
 
+const MaxForwardRouteLength = 3
+
 func ValidateForMode(cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("config is nil")
@@ -51,6 +53,9 @@ func ValidateClient(cfg *Config) error {
 		if fwd.Service == "" {
 			return fmt.Errorf("forwards[%d].service is required", i)
 		}
+		if err := validateForwardRoute(i, fwd, servers); err != nil {
+			return err
+		}
 		if len(servers) > 1 {
 			if fwd.Egress == "" {
 				return fmt.Errorf("forwards[%d].egress is required when multiple servers are configured", i)
@@ -63,6 +68,31 @@ func ValidateClient(cfg *Config) error {
 				return fmt.Errorf("forwards[%d].egress %q does not match the configured server", i, fwd.Egress)
 			}
 		}
+	}
+	return nil
+}
+
+func validateForwardRoute(i int, fwd ForwardConfig, servers map[string]ServerConfig) error {
+	if len(fwd.Route) == 0 {
+		return nil
+	}
+	if len(fwd.Route) > MaxForwardRouteLength {
+		return fmt.Errorf("forwards[%d].route has %d hops, max is %d", i, len(fwd.Route), MaxForwardRouteLength)
+	}
+	for j, hop := range fwd.Route {
+		if hop == "" {
+			return fmt.Errorf("forwards[%d].route[%d] is required", i, j)
+		}
+	}
+	if len(fwd.Route) > 1 {
+		return fmt.Errorf("forwards[%d].route with multiple hops is not implemented yet", i)
+	}
+	firstHop := fwd.Route[0]
+	if _, ok := servers[firstHop]; !ok {
+		return fmt.Errorf("forwards[%d].route[0] %q does not match a configured server", i, firstHop)
+	}
+	if fwd.Egress != "" && fwd.Egress != fwd.Route[len(fwd.Route)-1] {
+		return fmt.Errorf("forwards[%d].egress %q must match final route hop %q", i, fwd.Egress, fwd.Route[len(fwd.Route)-1])
 	}
 	return nil
 }

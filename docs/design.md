@@ -181,6 +181,20 @@ forwards:
 
 The client requests a named service. Service names are currently resolved on the selected direct upstream server. `egress` is optional when exactly one upstream server is configured; empty means that server may satisfy the request. When multiple upstream servers are configured, each forward must set `egress` to one configured server ID. In the current one-hop implementation, the selected server also requires any non-empty request `egress` to match its own `node_id`.
 
+A forward may include a `route` field as preparation for explicit multi-hop routing. The current runtime only supports empty routes or a one-hop route to a configured direct upstream server:
+
+```yaml
+forwards:
+  - protocol: tcp
+    listen: 127.0.0.1:15432
+    service: echo
+    egress: server-1
+    route:
+      - server-1
+```
+
+Multi-hop routes are part of the target model but are rejected by validation until relay forwarding is implemented.
+
 A client may configure multiple direct upstream servers:
 
 ```yaml
@@ -239,6 +253,9 @@ Client required fields:
 - each `servers[]` entry requires `id` and `address`
 - at least one `forwards` entry
 - each forward requires `protocol: tcp`, `listen`, and `service`; `egress` is optional with one upstream server and required with multiple upstream servers
+- `route` is optional; when set today it must contain exactly one configured direct upstream server
+- if both `route` and `egress` are set, `egress` must match the final route hop
+- multi-hop `route` values are rejected until relay forwarding is implemented
 
 Server required fields:
 

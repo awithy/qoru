@@ -132,6 +132,20 @@ forwards:
     egress: server-1
 ```
 
+A forward may also include a one-hop `route` to the selected direct upstream as preparation for future explicit multi-hop routing:
+
+```yaml
+forwards:
+  - protocol: tcp
+    listen: 127.0.0.1:15432
+    service: echo
+    egress: server-1
+    route:
+      - server-1
+```
+
+Multi-hop routes are not implemented yet and are rejected by validation for now.
+
 A client can configure multiple direct upstream servers. In that case each forward must set `egress` to a configured server ID:
 
 ```yaml

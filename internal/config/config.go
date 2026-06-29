@@ -39,10 +39,11 @@ type ServerConfig struct {
 }
 
 type ForwardConfig struct {
-	Protocol string `yaml:"protocol"`
-	Listen   string `yaml:"listen"`
-	Service  string `yaml:"service"`
-	Egress   string `yaml:"egress,omitempty"`
+	Protocol string   `yaml:"protocol"`
+	Listen   string   `yaml:"listen"`
+	Service  string   `yaml:"service"`
+	Egress   string   `yaml:"egress,omitempty"`
+	Route    []string `yaml:"route,omitempty"`
 }
 
 type ServiceConfig struct {

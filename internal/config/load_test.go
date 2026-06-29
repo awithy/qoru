@@ -23,6 +23,8 @@ forwards:
     listen: 127.0.0.1:15432
     service: echo
     egress: server-1
+    route:
+      - server-1
 `
 	if err := os.WriteFile(path, []byte(input), 0o644); err != nil {
 		t.Fatal(err)
@@ -32,7 +34,7 @@ forwards:
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if cfg.NodeID != "client-1" || len(cfg.Servers) != 1 || len(cfg.Forwards) != 1 || cfg.Forwards[0].Service != "echo" {
+	if cfg.NodeID != "client-1" || len(cfg.Servers) != 1 || len(cfg.Forwards) != 1 || cfg.Forwards[0].Service != "echo" || len(cfg.Forwards[0].Route) != 1 || cfg.Forwards[0].Route[0] != "server-1" {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 }
