@@ -5,10 +5,22 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/awithy/qoru/internal/config"
 	"github.com/quic-go/quic-go"
 )
+
+var reconnectBackoffAfterFailure = []time.Duration{
+	500 * time.Millisecond,
+	1 * time.Second,
+	2 * time.Second,
+	4 * time.Second,
+	8 * time.Second,
+	16 * time.Second,
+}
+
+type upstreamDialer func(context.Context, string, config.IdentityConfig, config.ServerConfig, *slog.Logger) (*quic.Conn, error)
 
 type upstreamSession interface {
 	OpenTCPStream(ctx context.Context, service, egress string) (*quic.Stream, error)
@@ -97,10 +109,23 @@ type reconnectingUpstreamSession struct {
 	mu     sync.Mutex
 	conn   *quic.Conn
 	closed bool
+
+	dial             upstreamDialer
+	now              func() time.Time
+	nextDial         time.Time
+	lastDialErr      error
+	backoffFailCount int
 }
 
 func newReconnectingUpstreamSession(nodeID string, identity config.IdentityConfig, server *config.ServerConfig, logger *slog.Logger) *reconnectingUpstreamSession {
-	return &reconnectingUpstreamSession{nodeID: nodeID, identity: identity, server: server, logger: logger}
+	return &reconnectingUpstreamSession{
+		nodeID:   nodeID,
+		identity: identity,
+		server:   server,
+		logger:   logger,
+		dial:     ConnectToServer,
+		now:      time.Now,
+	}
 }
 
 func (s *reconnectingUpstreamSession) OpenTCPStream(ctx context.Context, service, egress string) (*quic.Stream, error) {
@@ -150,12 +175,38 @@ func (s *reconnectingUpstreamSession) connection(ctx context.Context) (*quic.Con
 		s.conn = nil
 	}
 
-	conn, err := ConnectToServer(ctx, s.nodeID, s.identity, *s.server, s.logger)
+	now := s.now()
+	if !s.nextDial.IsZero() && now.Before(s.nextDial) {
+		if s.lastDialErr != nil {
+			return nil, fmt.Errorf("upstream reconnect backoff active until %s: %w", s.nextDial.Format(time.RFC3339Nano), s.lastDialErr)
+		}
+		return nil, fmt.Errorf("upstream reconnect backoff active until %s", s.nextDial.Format(time.RFC3339Nano))
+	}
+
+	conn, err := s.dial(ctx, s.nodeID, s.identity, *s.server, s.logger)
 	if err != nil {
+		s.recordDialFailure(now, err)
 		return nil, err
 	}
 	s.conn = conn
+	s.resetDialBackoff()
 	return conn, nil
+}
+
+func (s *reconnectingUpstreamSession) recordDialFailure(now time.Time, err error) {
+	delay := reconnectBackoffAfterFailure[len(reconnectBackoffAfterFailure)-1]
+	if s.backoffFailCount < len(reconnectBackoffAfterFailure) {
+		delay = reconnectBackoffAfterFailure[s.backoffFailCount]
+	}
+	s.backoffFailCount++
+	s.nextDial = now.Add(delay)
+	s.lastDialErr = err
+}
+
+func (s *reconnectingUpstreamSession) resetDialBackoff() {
+	s.nextDial = time.Time{}
+	s.lastDialErr = nil
+	s.backoffFailCount = 0
 }
 
 func (s *reconnectingUpstreamSession) dropConnection(conn *quic.Conn, reason string) {
