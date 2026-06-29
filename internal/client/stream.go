@@ -75,13 +75,13 @@ func ConnectToServer(ctx context.Context, nodeID string, identityCfg config.Iden
 	return conn, nil
 }
 
-func OpenTCPStream(ctx context.Context, conn *quic.Conn, service, egress string) (*quic.Stream, error) {
+func OpenTCPStream(ctx context.Context, conn *quic.Conn, service, egress string, route []string) (*quic.Stream, error) {
 	stream, err := conn.OpenStreamSync(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := protocol.WriteConnectRequest(stream, protocol.ConnectRequest{Protocol: "tcp", Service: service, Egress: egress}); err != nil {
+	if err := protocol.WriteConnectRequest(stream, protocol.ConnectRequest{Protocol: "tcp", Service: service, Egress: egress, Route: route}); err != nil {
 		_ = stream.Close()
 		return nil, err
 	}

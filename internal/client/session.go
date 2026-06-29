@@ -23,7 +23,7 @@ var reconnectBackoffAfterFailure = []time.Duration{
 type upstreamDialer func(context.Context, string, config.IdentityConfig, config.ServerConfig, *slog.Logger) (*quic.Conn, error)
 
 type upstreamSession interface {
-	OpenTCPStream(ctx context.Context, service, egress string) (*quic.Stream, error)
+	OpenTCPStream(ctx context.Context, service, egress string, route []string) (*quic.Stream, error)
 	Close(reason string)
 }
 
@@ -71,12 +71,12 @@ func (s *upstreamSessions) ConnectAll(ctx context.Context) error {
 	return nil
 }
 
-func (s *upstreamSessions) OpenTCPStream(ctx context.Context, service, egress string) (*quic.Stream, error) {
+func (s *upstreamSessions) OpenTCPStream(ctx context.Context, service, egress string, route []string) (*quic.Stream, error) {
 	session, selectedEgress, err := s.selectSession(egress)
 	if err != nil {
 		return nil, err
 	}
-	return session.OpenTCPStream(ctx, service, selectedEgress)
+	return session.OpenTCPStream(ctx, service, selectedEgress, route)
 }
 
 func (s *upstreamSessions) Close(reason string) {
@@ -128,13 +128,13 @@ func newReconnectingUpstreamSession(nodeID string, identity config.IdentityConfi
 	}
 }
 
-func (s *reconnectingUpstreamSession) OpenTCPStream(ctx context.Context, service, egress string) (*quic.Stream, error) {
+func (s *reconnectingUpstreamSession) OpenTCPStream(ctx context.Context, service, egress string, route []string) (*quic.Stream, error) {
 	conn, err := s.connection(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	stream, err := OpenTCPStream(ctx, conn, service, egress)
+	stream, err := OpenTCPStream(ctx, conn, service, egress, route)
 	if err == nil {
 		return stream, nil
 	}
@@ -147,7 +147,7 @@ func (s *reconnectingUpstreamSession) OpenTCPStream(ctx context.Context, service
 	if connErr != nil {
 		return nil, fmt.Errorf("%w; reconnect failed: %v", err, connErr)
 	}
-	return OpenTCPStream(ctx, conn, service, egress)
+	return OpenTCPStream(ctx, conn, service, egress, route)
 }
 
 func (s *reconnectingUpstreamSession) Close(reason string) {

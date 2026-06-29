@@ -75,7 +75,7 @@ For each local TCP connection:
 
 1. select an upstream by the forward's `egress` value, or the sole configured upstream when `egress` is empty
 2. open a new QUIC stream on the selected upstream connection
-3. send `ConnectRequest{Protocol: "tcp", Service: "...", Egress: "..."}`
+3. send `ConnectRequest{Protocol: "tcp", Service: "...", Egress: "...", Route: [...]}`
 4. read `ConnectResponse`
 5. if OK, proxy bytes between the local TCP connection and QUIC stream
 
@@ -337,7 +337,13 @@ service_len  uint16 big endian
 service      []byte
 egress_len   uint16 big endian
 egress       []byte
+route_count  uint8
+repeated route_count times:
+  hop_len    uint16 big endian
+  hop        []byte
 ```
+
+`route` is currently carried on the wire for explicit-route preparation. Runtime validation still rejects multi-hop routes until relay forwarding is implemented.
 
 ### `ConnectResponse`
 
@@ -426,7 +432,7 @@ The current client runtime lives in `internal/client`.
 3. binds one local TCP listener per configured `forwards` entry
 4. starts accept loops for all listeners
 5. for each local TCP connection, selects an upstream session by forward `egress` and opens a new QUIC stream
-6. sends `ConnectRequest{Protocol: "tcp", Service: "...", Egress: "..."}`
+6. sends `ConnectRequest{Protocol: "tcp", Service: "...", Egress: "...", Route: [...]}`
 7. waits for `ConnectResponse`
 8. proxies bytes between the local TCP connection and QUIC stream
 9. exits cleanly when the context is canceled

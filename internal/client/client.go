@@ -125,7 +125,7 @@ func acceptForward(ctx context.Context, session upstreamSession, forward config.
 		handlerWG.Add(1)
 		go func() {
 			defer handlerWG.Done()
-			handleLocalConnection(ctx, session, forward.Service, forward.Egress, localConn, logger)
+			handleLocalConnection(ctx, session, forward.Service, forward.Egress, forward.Route, localConn, logger)
 		}()
 	}
 }
@@ -145,10 +145,10 @@ func waitGroupTimeout(wg *sync.WaitGroup, timeout time.Duration) error {
 	}
 }
 
-func handleLocalConnection(ctx context.Context, session upstreamSession, service, egress string, localConn net.Conn, logger *slog.Logger) {
+func handleLocalConnection(ctx context.Context, session upstreamSession, service, egress string, route []string, localConn net.Conn, logger *slog.Logger) {
 	defer localConn.Close()
 
-	stream, err := session.OpenTCPStream(ctx, service, egress)
+	stream, err := session.OpenTCPStream(ctx, service, egress, route)
 	if err != nil {
 		if logger != nil {
 			var rejected *ConnectRejectedError

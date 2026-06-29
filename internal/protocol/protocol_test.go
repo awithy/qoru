@@ -10,7 +10,7 @@ import (
 
 func TestConnectRequestRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
-	want := ConnectRequest{Protocol: "tcp", Service: "echo", Egress: "server-1"}
+	want := ConnectRequest{Protocol: "tcp", Service: "echo", Egress: "server-1", Route: []string{"server-1"}}
 
 	if err := WriteConnectRequest(&buf, want); err != nil {
 		t.Fatalf("WriteConnectRequest returned error: %v", err)
@@ -20,7 +20,7 @@ func TestConnectRequestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadConnectRequest returned error: %v", err)
 	}
-	if got != want {
+	if got.Protocol != want.Protocol || got.Service != want.Service || got.Egress != want.Egress || strings.Join(got.Route, ",") != strings.Join(want.Route, ",") {
 		t.Fatalf("expected %#v, got %#v", want, got)
 	}
 }

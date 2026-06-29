@@ -78,6 +78,15 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 		return
 	}
 
+	if err := validateConnectRoute(cfg.NodeID, req.Route, req.Egress); err != nil {
+		if logger != nil {
+			logger.Warn("route invalid", "peer_id", peerID, "route", req.Route, "egress", req.Egress, "error", err)
+		}
+		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeRouteInvalid, Message: err.Error()})
+		_ = stream.Close()
+		return
+	}
+
 	if req.Egress != "" && req.Egress != cfg.NodeID {
 		err := fmt.Errorf("egress %q is not reachable from one-hop server %q", req.Egress, cfg.NodeID)
 		if logger != nil {
@@ -126,6 +135,22 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 	if logger != nil {
 		logger.Info("tcp proxy closed", "peer_id", peerID, "service", svc.Name, "target", svc.Target)
 	}
+}
+
+func validateConnectRoute(nodeID string, route []string, egress string) error {
+	if len(route) == 0 {
+		return nil
+	}
+	if len(route) > 1 {
+		return fmt.Errorf("multi-hop route is not implemented yet")
+	}
+	if route[0] != nodeID {
+		return fmt.Errorf("route first hop %q does not match this node %q", route[0], nodeID)
+	}
+	if egress != "" && egress != route[len(route)-1] {
+		return fmt.Errorf("egress %q must match final route hop %q", egress, route[len(route)-1])
+	}
+	return nil
 }
 
 func serviceErrorCode(err error) protocol.ConnectCode {

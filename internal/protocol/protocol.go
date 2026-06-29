@@ -78,6 +78,7 @@ type ConnectRequest struct {
 	Protocol string
 	Service  string
 	Egress   string
+	Route    []string
 }
 
 type ConnectResponse struct {
@@ -143,8 +144,21 @@ func WriteConnectRequest(w io.Writer, req ConnectRequest) error {
 	if len(req.Egress) > MaxTargetLength {
 		return fmt.Errorf("egress too long: %d > %d", len(req.Egress), MaxTargetLength)
 	}
+	if len(req.Route) > 255 {
+		return fmt.Errorf("route too long: %d > %d", len(req.Route), 255)
+	}
+	routeLen := 1
+	for i, hop := range req.Route {
+		if hop == "" {
+			return fmt.Errorf("route[%d] is required", i)
+		}
+		if len(hop) > MaxTargetLength {
+			return fmt.Errorf("route[%d] too long: %d > %d", i, len(hop), MaxTargetLength)
+		}
+		routeLen += 2 + len(hop)
+	}
 
-	payload := make([]byte, 1+len(req.Protocol)+2+len(req.Service)+2+len(req.Egress))
+	payload := make([]byte, 1+len(req.Protocol)+2+len(req.Service)+2+len(req.Egress)+routeLen)
 	payload[0] = uint8(len(req.Protocol))
 	copy(payload[1:], req.Protocol)
 	offset := 1 + len(req.Protocol)
@@ -153,6 +167,14 @@ func WriteConnectRequest(w io.Writer, req ConnectRequest) error {
 	offset += 2 + len(req.Service)
 	binary.BigEndian.PutUint16(payload[offset:offset+2], uint16(len(req.Egress)))
 	copy(payload[offset+2:], req.Egress)
+	offset += 2 + len(req.Egress)
+	payload[offset] = uint8(len(req.Route))
+	offset++
+	for _, hop := range req.Route {
+		binary.BigEndian.PutUint16(payload[offset:offset+2], uint16(len(hop)))
+		copy(payload[offset+2:], hop)
+		offset += 2 + len(hop)
+	}
 
 	return WriteFrame(w, TypeConnectRequest, payload)
 }
@@ -198,11 +220,39 @@ func ReadConnectRequest(r io.Reader) (ConnectRequest, error) {
 	if egressLen > MaxTargetLength {
 		return ConnectRequest{}, fmt.Errorf("egress too long: %d > %d", egressLen, MaxTargetLength)
 	}
-	if len(frame.Payload[offset+2:]) != egressLen {
-		return ConnectRequest{}, fmt.Errorf("malformed connect payload: egress length mismatch")
+	if len(frame.Payload) < offset+2+egressLen+1 {
+		return ConnectRequest{}, fmt.Errorf("malformed connect payload: missing route length")
+	}
+	egress := string(frame.Payload[offset+2 : offset+2+egressLen])
+	offset += 2 + egressLen
+	routeCount := int(frame.Payload[offset])
+	offset++
+	var route []string
+	if routeCount > 0 {
+		route = make([]string, 0, routeCount)
+	}
+	for i := 0; i < routeCount; i++ {
+		if len(frame.Payload) < offset+2 {
+			return ConnectRequest{}, fmt.Errorf("malformed connect payload: missing route[%d] length", i)
+		}
+		hopLen := int(binary.BigEndian.Uint16(frame.Payload[offset : offset+2]))
+		if hopLen == 0 {
+			return ConnectRequest{}, fmt.Errorf("route[%d] is required", i)
+		}
+		if hopLen > MaxTargetLength {
+			return ConnectRequest{}, fmt.Errorf("route[%d] too long: %d > %d", i, hopLen, MaxTargetLength)
+		}
+		if len(frame.Payload) < offset+2+hopLen {
+			return ConnectRequest{}, fmt.Errorf("malformed connect payload: route[%d] length mismatch", i)
+		}
+		route = append(route, string(frame.Payload[offset+2:offset+2+hopLen]))
+		offset += 2 + hopLen
+	}
+	if len(frame.Payload[offset:]) != 0 {
+		return ConnectRequest{}, fmt.Errorf("malformed connect payload: trailing bytes")
 	}
 
-	return ConnectRequest{Protocol: protocol, Service: service, Egress: string(frame.Payload[offset+2:])}, nil
+	return ConnectRequest{Protocol: protocol, Service: service, Egress: egress, Route: route}, nil
 }
 
 func WriteConnectResponse(w io.Writer, resp ConnectResponse) error {
