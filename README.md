@@ -17,7 +17,8 @@ TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
 - QUIC transport using `quic-go`.
 - mTLS peer authentication with a configured private CA.
 - Custom binary control protocol.
-- One QUIC connection shared by client-side TCP forwards.
+- One upstream QUIC connection shared by client-side TCP forwards.
+- On-demand upstream reconnect for new local TCP connections after a QUIC connection loss.
 - One QUIC stream per proxied TCP connection.
 - Multiple local TCP forwards.
 - Named TCP services on the server.
@@ -162,6 +163,8 @@ QUIC mTLS                        = hop-by-hop, peer -> peer
 
 The current implementation has QUIC/mTLS hop-by-hop encryption and authentication. End-to-end application payload encryption for multi-hop relay paths is not implemented yet.
 
+If the client-side upstream QUIC connection is lost, active proxied TCP connections on that connection are closed. The qoru client keeps its local listeners running and reconnects on demand for later local TCP connections.
+
 For the current one-hop path:
 
 ```text
@@ -181,7 +184,7 @@ Near-term:
 
 - Improve active connection shutdown behavior.
 - Improve service dial failure behavior for local TCP clients.
-- Add more robust reconnect behavior for client/server QUIC sessions.
+- Add more robust reconnect behavior, including backoff and clearer server-side session handling.
 - Add richer service selection semantics for future multi-egress/load-balanced service routing.
 
 Longer-term:

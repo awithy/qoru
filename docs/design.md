@@ -21,7 +21,8 @@ Implemented today:
 - QUIC transport using `quic-go`.
 - Custom binary control protocol.
 - Client-side local TCP listeners from `forwards`.
-- One shared QUIC connection from client to server.
+- One shared upstream QUIC connection from client to server.
+- On-demand upstream reconnect for new local TCP connections after connection loss.
 - One QUIC stream per proxied local TCP connection.
 - Multiple local TCP forwards.
 - Server support for multiple streams per QUIC connection.
@@ -33,7 +34,7 @@ Implemented today:
 
 Not implemented yet:
 
-- reconnect behavior if the shared QUIC connection dies
+- resuming active proxied TCP connections across upstream QUIC reconnects
 - multi-hop forwarding
 - end-to-end encrypted payload frames
 - UDP forwarding
@@ -67,7 +68,7 @@ If `--config` is omitted, qoru resolves config using the first existing path fro
 
 ### `qoru client`
 
-Loads and validates client config, establishes one QUIC/mTLS connection to the configured qoru server, starts all configured local TCP listeners, and opens one QUIC stream per accepted local TCP connection.
+Loads and validates client config, establishes one QUIC/mTLS connection to the configured qoru server, starts all configured local TCP listeners, and opens one QUIC stream per accepted local TCP connection. If the upstream QUIC connection later fails, the client keeps its local listeners open and reconnects on demand for future local TCP connections.
 
 For each local TCP connection:
 
@@ -112,7 +113,7 @@ forwards:
     egress: server-1
 ```
 
-The client requests a named service. `egress` is optional today; if set in the current one-hop implementation, it must match the connected server's `node_id`.
+The client requests a named service. Service names are currently resolved on the connected server. `egress` is optional today; empty means the connected server may satisfy the request. If set in the current one-hop implementation, it must match the connected server's `node_id`.
 
 ### Server config
 
@@ -294,12 +295,13 @@ The current client runtime lives in `internal/client`.
 2. establishes one QUIC/mTLS connection to the configured server
 3. binds one local TCP listener per configured `forwards` entry
 4. starts accept loops for all listeners
-5. for each local TCP connection, opens a new QUIC stream on the shared connection
+5. for each local TCP connection, opens a new QUIC stream through a reconnecting upstream session
 6. sends `ConnectRequest{Protocol: "tcp", Service: "...", Egress: "..."}`
 7. waits for `ConnectResponse`
 8. proxies bytes between the local TCP connection and QUIC stream
 9. exits cleanly when the context is canceled
-10. returns an error if the shared QUIC connection closes unexpectedly
+10. keeps local listeners running if the upstream QUIC connection later fails
+11. reconnects on demand when a later local TCP connection needs a new stream
 
 Useful lower-level helpers:
 
@@ -307,8 +309,7 @@ Useful lower-level helpers:
 - `OpenTCPStream` opens a stream and performs the `ConnectRequest`/`ConnectResponse` handshake.
 - `ConnectTCP` opens a fresh QUIC connection and stream; this is primarily useful in tests and small helper flows.
 
-Current limitation: no reconnect behavior yet. If the shared QUIC connection dies, the client runtime exits instead of reconnecting.
-
+Current limitation: reconnect is on demand and applies only to future local TCP connections. Active proxied TCP connections are bound to streams on the old QUIC connection; if that connection dies, those TCP connections are closed rather than resumed.
 ## Server Runtime
 
 The current server runtime lives in `internal/server`.
@@ -405,7 +406,7 @@ docs/                  design documentation
 
 1. Improve active connection shutdown and goroutine lifecycle tracking.
 2. Add clearer local TCP behavior when service setup/dialing fails.
-3. Add reconnect behavior for the shared client QUIC connection.
+3. Improve reconnect behavior with backoff and clearer server-side session handling.
 4. Consider configurable log level/log format and timeout settings.
 5. Add richer service selection semantics for future multi-egress/load-balanced service routing.
 6. Later: multi-hop forwarding and end-to-end encrypted payload frames.

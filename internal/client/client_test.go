@@ -233,6 +233,38 @@ func TestOpenTCPStreamReturnsTargetDialError(t *testing.T) {
 	cancelAndWaitForServer(t, cancel, serverErr)
 }
 
+func TestOpenTCPStreamReturnsEgressError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	target := startEchoTCPServer(t)
+	serverCfg := testServerConfig()
+	serverCfg.Services = []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: target.Addr().String(), Peers: []string{"client-1"}}}
+	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, nil)
+	clientCfg := testClientConfig(addr, target.Addr().String())
+
+	conn, err := Connect(ctx, clientCfg, logger)
+	if err != nil {
+		t.Fatalf("expected client to connect: %v", err)
+	}
+	defer conn.CloseWithError(0, "done")
+
+	_, err = OpenTCPStream(ctx, conn, "echo", "server-2")
+	if err == nil {
+		t.Fatal("expected egress error")
+	}
+	var rejected *ConnectRejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("expected ConnectRejectedError, got %T: %v", err, err)
+	}
+	if !strings.Contains(rejected.Message, "not reachable") {
+		t.Fatalf("unexpected rejection message: %q", rejected.Message)
+	}
+
+	cancelAndWaitForServer(t, cancel, serverErr)
+}
+
 func TestOpenTCPStreamReturnsTargetPolicyError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
