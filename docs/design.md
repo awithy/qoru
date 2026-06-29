@@ -26,13 +26,14 @@ Implemented today:
 - Multiple local TCP forwards.
 - Server support for multiple streams per QUIC connection.
 - Server-side TCP target dialing with timeout and basic target address validation.
+- Optional server-side TCP target allowlist.
 - `ConnectTCPResponse` success/failure handshake before raw TCP proxying begins.
 - Bidirectional byte proxying between local TCP, QUIC streams, and server-side TCP targets.
 
 Not implemented yet:
 
-- server-side target access policy
 - peer identity extraction/logging beyond TLS verification
+- per-peer/per-client target access policy
 - reconnect behavior if the shared QUIC connection dies
 - multi-hop forwarding
 - end-to-end encrypted payload frames
@@ -124,6 +125,10 @@ identity:
   ca: ./dev/certs/ca.crt
 
 listen: 127.0.0.1:4433
+
+# Optional. If omitted or empty, any syntactically valid target is allowed.
+allowed_tcp_targets:
+  - 127.0.0.1:9000
 ```
 
 ## Config Validation
@@ -148,6 +153,10 @@ Server required fields:
 
 - `mode: server`
 - `listen`
+
+Optional server fields:
+
+- `allowed_tcp_targets`: exact `host:port` targets the server may dial. If omitted or empty, the current development behavior allows any syntactically valid target.
 
 ## TLS and Identity
 
@@ -312,12 +321,13 @@ The current server runtime lives in `internal/server`.
 6. accepts multiple streams per QUIC connection
 7. reads `ConnectTCPRequest` per stream
 8. validates target address shape
-9. dials the requested TCP target with timeout
-10. sends `ConnectTCPResponse`
+9. checks the optional TCP target allowlist
+10. dials the requested TCP target with timeout
+11. sends `ConnectTCPResponse`
 11. if OK, proxies bytes between the QUIC stream and TCP target
 12. exits cleanly when the context is canceled
 
-Current limitation: target access policy is not implemented. Any authenticated client can request any syntactically valid TCP target address reachable from the server.
+Current limitation: target access policy is target-only. If `allowed_tcp_targets` is empty, any authenticated client can request any syntactically valid TCP target address reachable from the server. Per-client policy is not implemented yet.
 
 ## CLI Runtime Wiring
 
@@ -393,7 +403,7 @@ docs/                  design documentation
 1. Improve active connection shutdown and goroutine lifecycle tracking.
 2. Add clearer local TCP behavior when target setup fails.
 3. Extract/log authenticated peer identities from certificates.
-4. Add server-side target access policy.
+4. Add per-client target access policy.
 5. Add reconnect behavior for the shared client QUIC connection.
 6. Consider configurable log level/log format and timeout settings.
 7. Later: multi-hop forwarding and end-to-end encrypted payload frames.

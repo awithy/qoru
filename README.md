@@ -21,6 +21,7 @@ TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
 - One QUIC stream per proxied TCP connection.
 - Multiple local TCP forwards.
 - Server-side TCP target dialing and byte proxying.
+- Optional server-side TCP target allowlist.
 - Development certificate generation.
 - Local echo-server demo.
 
@@ -128,6 +129,10 @@ identity:
   ca: ./dev/certs/ca.crt
 
 listen: 127.0.0.1:4433
+
+# Optional. If omitted or empty, any syntactically valid target is allowed.
+allowed_tcp_targets:
+  - 127.0.0.1:9000
 ```
 
 ## Security Model
@@ -155,8 +160,8 @@ Near-term:
 
 - Improve active connection shutdown behavior.
 - Add clearer target dial failure behavior for local TCP clients.
-- Add server-side target access policy.
 - Extract/log authenticated peer identities from certificates.
+- Add per-peer/per-client target access policy.
 - Add more robust reconnect behavior for client/server QUIC sessions.
 
 Longer-term:

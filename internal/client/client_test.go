@@ -169,6 +169,33 @@ func TestOpenTCPStreamReturnsTargetDialError(t *testing.T) {
 	cancelAndWaitForServer(t, cancel, serverErr)
 }
 
+func TestOpenTCPStreamReturnsTargetPolicyError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	serverCfg := testServerConfig()
+	serverCfg.AllowedTCPTargets = []string{"127.0.0.1:9000"}
+	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, nil)
+	clientCfg := testClientConfig(addr, "127.0.0.1:9001")
+
+	conn, err := Connect(ctx, clientCfg, logger)
+	if err != nil {
+		t.Fatalf("expected client to connect: %v", err)
+	}
+	defer conn.CloseWithError(0, "done")
+
+	_, err = OpenTCPStream(ctx, conn, "127.0.0.1:9001")
+	if err == nil {
+		t.Fatal("expected target policy error")
+	}
+	if !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cancelAndWaitForServer(t, cancel, serverErr)
+}
+
 func TestConnectTCPProxiesBytesToTarget(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -258,13 +285,20 @@ func assertEcho(t *testing.T, addr, msg string) {
 
 func startTestServer(t *testing.T, ctx context.Context, logger *slog.Logger, onConnect func(protocol.ConnectTCPRequest)) (string, <-chan error) {
 	t.Helper()
-	serverCfg := &config.Config{
+	return startTestServerWithConfig(t, ctx, logger, testServerConfig(), onConnect)
+}
+
+func testServerConfig() *config.Config {
+	return &config.Config{
 		NodeID:   "server-1",
 		Mode:     config.ModeServer,
 		Identity: config.IdentityConfig{Cert: "../../dev/certs/server-1.crt", Key: "../../dev/certs/server-1.key", CA: "../../dev/certs/ca.crt"},
 		Listen:   "127.0.0.1:0",
 	}
+}
 
+func startTestServerWithConfig(t *testing.T, ctx context.Context, logger *slog.Logger, serverCfg *config.Config, onConnect func(protocol.ConnectTCPRequest)) (string, <-chan error) {
+	t.Helper()
 	started := make(chan string, 1)
 	serverErr := make(chan error, 1)
 	options := []server.Option{server.WithStartedFunc(func(addr string) { started <- addr })}

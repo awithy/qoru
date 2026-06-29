@@ -23,7 +23,8 @@ type Config struct {
 	Server *ServerConfig `yaml:"server,omitempty"`
 	Listen string        `yaml:"listen,omitempty"`
 
-	TCPForwards []TCPForwardConfig `yaml:"tcp_forwards,omitempty"`
+	TCPForwards       []TCPForwardConfig `yaml:"tcp_forwards,omitempty"`
+	AllowedTCPTargets []string           `yaml:"allowed_tcp_targets,omitempty"`
 }
 
 type IdentityConfig struct {

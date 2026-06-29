@@ -66,6 +66,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 			}
 			return err
 		}
-		go handleConnection(ctx, conn, logger, opts)
+		go handleConnection(ctx, cfg, conn, logger, opts)
 	}
 }

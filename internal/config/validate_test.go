@@ -59,6 +59,22 @@ func TestValidateServerRejectsMissingListen(t *testing.T) {
 	}
 }
 
+func TestValidateServerAcceptsAllowedTCPTargets(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.AllowedTCPTargets = []string{"127.0.0.1:9000", "example.com:443"}
+	if err := ValidateServer(&cfg); err != nil {
+		t.Fatalf("expected valid server config, got %v", err)
+	}
+}
+
+func TestValidateServerRejectsInvalidAllowedTCPTarget(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.AllowedTCPTargets = []string{"localhost"}
+	if err := ValidateServer(&cfg); err == nil {
+		t.Fatal("expected invalid allowed tcp target to be rejected")
+	}
+}
+
 func TestValidateForMode(t *testing.T) {
 	client := validClientConfig()
 	server := validServerConfig()

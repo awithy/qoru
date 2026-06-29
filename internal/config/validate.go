@@ -1,6 +1,9 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"net"
+)
 
 func ValidateForMode(cfg *Config) error {
 	if cfg == nil {
@@ -58,6 +61,14 @@ func ValidateServer(cfg *Config) error {
 	}
 	if cfg.Listen == "" {
 		return fmt.Errorf("listen is required for server mode")
+	}
+	for i, target := range cfg.AllowedTCPTargets {
+		if target == "" {
+			return fmt.Errorf("allowed_tcp_targets[%d] is required", i)
+		}
+		if _, _, err := net.SplitHostPort(target); err != nil {
+			return fmt.Errorf("allowed_tcp_targets[%d] must be host:port: %w", i, err)
+		}
 	}
 	return nil
 }

@@ -5,13 +5,14 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/awithy/qoru/internal/config"
 	"github.com/awithy/qoru/internal/protocol"
 	"github.com/quic-go/quic-go"
 )
 
 const defaultTCPDialTimeout = 10 * time.Second
 
-func handleConnection(ctx context.Context, conn *quic.Conn, logger *slog.Logger, opts options) {
+func handleConnection(ctx context.Context, cfg *config.Config, conn *quic.Conn, logger *slog.Logger, opts options) {
 	defer conn.CloseWithError(0, "done")
 
 	for {
@@ -22,11 +23,11 @@ func handleConnection(ctx context.Context, conn *quic.Conn, logger *slog.Logger,
 			}
 			return
 		}
-		go handleStream(ctx, stream, logger, opts)
+		go handleStream(ctx, cfg, stream, logger, opts)
 	}
 }
 
-func handleStream(ctx context.Context, stream *quic.Stream, logger *slog.Logger, opts options) {
+func handleStream(ctx context.Context, cfg *config.Config, stream *quic.Stream, logger *slog.Logger, opts options) {
 	req, err := protocol.ReadConnectTCPRequest(stream)
 	if err != nil {
 		if logger != nil {
@@ -41,6 +42,15 @@ func handleStream(ctx context.Context, stream *quic.Stream, logger *slog.Logger,
 	}
 	if opts.connectTCPRequest != nil {
 		opts.connectTCPRequest(req)
+	}
+
+	if err := authorizeTCPTarget(cfg, req.Target); err != nil {
+		if logger != nil {
+			logger.Warn("tcp target denied", "target", req.Target, "error", err)
+		}
+		_ = protocol.WriteConnectTCPResponse(stream, protocol.ConnectTCPResponse{OK: false, Message: err.Error()})
+		_ = stream.Close()
+		return
 	}
 
 	targetConn, err := dialTCP(ctx, req.Target)
