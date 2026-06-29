@@ -11,6 +11,7 @@ import (
 	"github.com/awithy/qoru/internal/config"
 	"github.com/awithy/qoru/internal/protocol"
 	"github.com/awithy/qoru/internal/server"
+	"github.com/quic-go/quic-go"
 )
 
 func TestRunListensAndProxiesLocalTCP(t *testing.T) {
@@ -111,6 +112,37 @@ func TestRunListensOnMultipleForwards(t *testing.T) {
 	cancelAndWaitForServer(t, serverCancel, serverErr)
 }
 
+func TestMultipleStreamsOnOneQUICConnection(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	addr, serverErr := startTestServer(t, ctx, logger, nil)
+	targetA := startEchoTCPServer(t)
+	targetB := startEchoTCPServer(t)
+	clientCfg := testClientConfig(addr, targetA.Addr().String())
+
+	conn, err := Connect(ctx, clientCfg, logger)
+	if err != nil {
+		t.Fatalf("expected client to connect: %v", err)
+	}
+	defer conn.CloseWithError(0, "done")
+
+	streamA, err := OpenTCPStream(ctx, conn, targetA.Addr().String())
+	if err != nil {
+		t.Fatalf("open stream A: %v", err)
+	}
+	streamB, err := OpenTCPStream(ctx, conn, targetB.Addr().String())
+	if err != nil {
+		t.Fatalf("open stream B: %v", err)
+	}
+
+	assertStreamEcho(t, streamA, "aaaa")
+	assertStreamEcho(t, streamB, "bbbb")
+
+	cancelAndWaitForServer(t, cancel, serverErr)
+}
+
 func TestConnectTCPProxiesBytesToTarget(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -162,6 +194,20 @@ func waitForClientAddr(t *testing.T, started <-chan string, clientErr <-chan err
 		t.Fatal("timed out waiting for client to start")
 	}
 	panic("unreachable")
+}
+
+func assertStreamEcho(t *testing.T, stream *quic.Stream, msg string) {
+	t.Helper()
+	if _, err := stream.Write([]byte(msg)); err != nil {
+		t.Fatalf("write to stream: %v", err)
+	}
+	buf := make([]byte, len(msg))
+	if _, err := io.ReadFull(stream, buf); err != nil {
+		t.Fatalf("read from stream: %v", err)
+	}
+	if string(buf) != msg {
+		t.Fatalf("expected echo %q, got %q", msg, string(buf))
+	}
 }
 
 func assertEcho(t *testing.T, addr, msg string) {

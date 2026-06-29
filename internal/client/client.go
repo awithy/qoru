@@ -115,34 +115,51 @@ func handleLocalConnection(ctx context.Context, cfg *config.Config, target strin
 	proxyTCP(localConn, stream)
 }
 
-func ConnectTCP(ctx context.Context, cfg *config.Config, target string, logger *slog.Logger) (*quic.Conn, *quic.Stream, error) {
+func Connect(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*quic.Conn, error) {
 	if err := config.ValidateClient(cfg); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	tlsConfig, err := identity.ClientTLSConfig(cfg.Identity, cfg.Server.ID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	conn, err := quic.DialAddr(ctx, cfg.Server.Address, tlsConfig, &quic.Config{})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	if logger != nil {
 		logger.Info("client connected", "node_id", cfg.NodeID, "server_id", cfg.Server.ID, "addr", cfg.Server.Address)
 	}
 
+	return conn, nil
+}
+
+func OpenTCPStream(ctx context.Context, conn *quic.Conn, target string) (*quic.Stream, error) {
 	stream, err := conn.OpenStreamSync(ctx)
 	if err != nil {
-		_ = conn.CloseWithError(0, "open stream failed")
-		return nil, nil, err
+		return nil, err
 	}
 
 	if err := protocol.WriteConnectTCPRequest(stream, protocol.ConnectTCPRequest{Target: target}); err != nil {
 		_ = stream.Close()
-		_ = conn.CloseWithError(0, "write connect tcp request failed")
+		return nil, err
+	}
+
+	return stream, nil
+}
+
+func ConnectTCP(ctx context.Context, cfg *config.Config, target string, logger *slog.Logger) (*quic.Conn, *quic.Stream, error) {
+	conn, err := Connect(ctx, cfg, logger)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	stream, err := OpenTCPStream(ctx, conn, target)
+	if err != nil {
+		_ = conn.CloseWithError(0, "open tcp stream failed")
 		return nil, nil, err
 	}
 

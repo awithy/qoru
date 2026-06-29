@@ -12,19 +12,25 @@ import (
 func handleConnection(ctx context.Context, conn *quic.Conn, logger *slog.Logger, opts options) {
 	defer conn.CloseWithError(0, "done")
 
-	stream, err := conn.AcceptStream(ctx)
-	if err != nil {
-		if ctx.Err() == nil && logger != nil {
-			logger.Error("accept stream failed", "error", err)
+	for {
+		stream, err := conn.AcceptStream(ctx)
+		if err != nil {
+			if ctx.Err() == nil && logger != nil {
+				logger.Error("accept stream failed", "error", err)
+			}
+			return
 		}
-		return
+		go handleStream(stream, logger, opts)
 	}
+}
 
+func handleStream(stream *quic.Stream, logger *slog.Logger, opts options) {
 	req, err := protocol.ReadConnectTCPRequest(stream)
 	if err != nil {
 		if logger != nil {
 			logger.Error("read connect tcp request failed", "error", err)
 		}
+		_ = stream.Close()
 		return
 	}
 
@@ -40,6 +46,7 @@ func handleConnection(ctx context.Context, conn *quic.Conn, logger *slog.Logger,
 		if logger != nil {
 			logger.Error("tcp target dial failed", "target", req.Target, "error", err)
 		}
+		_ = stream.Close()
 		return
 	}
 	defer targetConn.Close()
