@@ -25,14 +25,14 @@ Implemented today:
 - One QUIC stream per proxied local TCP connection.
 - Multiple local TCP forwards.
 - Server support for multiple streams per QUIC connection.
-- Server-side TCP target dialing with timeout and basic target address validation.
-- Optional server-side TCP target allowlist.
+- Server-side named TCP services with per-service peer authorization.
+- Optional one-hop egress selection; selected egress must currently be the connected server.
+- Server-side TCP target dialing with timeout and basic service target address validation.
 - `ConnectResponse` success/failure handshake before raw TCP proxying begins.
 - Bidirectional byte proxying between local TCP, QUIC streams, and server-side TCP targets.
 
 Not implemented yet:
 
-- per-peer/per-client target access policy
 - reconnect behavior if the shared QUIC connection dies
 - multi-hop forwarding
 - end-to-end encrypted payload frames
@@ -78,7 +78,7 @@ For each local TCP connection:
 
 ### `qoru server`
 
-Loads and validates server config, loads its TLS identity, starts a QUIC listener, accepts QUIC connections, accepts multiple streams per connection, reads `ConnectRequest`, dials the requested TCP target, sends `ConnectResponse`, and proxies bytes between the QUIC stream and target TCP connection.
+Loads and validates server config, loads its TLS identity, starts a QUIC listener, accepts QUIC connections, accepts multiple streams per connection, reads `ConnectRequest`, resolves the requested service, dials the service target, sends `ConnectResponse`, and proxies bytes between the QUIC stream and target TCP connection.
 
 ### `qoru print-config`
 
@@ -237,7 +237,7 @@ egress       []byte
 
 ### `ConnectResponse`
 
-Sent by the server after attempting to open the requested target.
+Sent by the server after attempting to open the requested service.
 
 Payload format:
 
@@ -268,7 +268,7 @@ Timeouts are currently hardcoded.
 - client QUIC dial timeout: `10s`
 - server TCP target dial timeout: `10s`
 
-Server target dialing uses `net.Dialer.DialContext` and validates targets with `net.SplitHostPort` before dialing. DNS lookup and dial errors are reported through `ConnectResponse`.
+Server service target dialing uses `net.Dialer.DialContext` and validates configured service targets with `net.SplitHostPort` before dialing. DNS lookup and dial errors are reported through `ConnectResponse`.
 
 Timeouts are not yet configurable.
 
@@ -322,12 +322,13 @@ The current server runtime lives in `internal/server`.
 5. accepts QUIC connections
 6. accepts multiple streams per QUIC connection
 7. reads `ConnectRequest` per stream
-8. validates target address shape
-9. checks the optional TCP target allowlist
-10. dials the requested TCP target with timeout
-11. sends `ConnectResponse`
-11. if OK, proxies bytes between the QUIC stream and TCP target
-12. exits cleanly when the context is canceled
+8. validates that the requested protocol is currently supported (`tcp`)
+9. validates optional `egress` against this server's `node_id`
+10. resolves and authorizes the requested service for the authenticated peer
+11. dials the configured TCP service target with timeout
+12. sends `ConnectResponse`
+13. if OK, proxies bytes between the QUIC stream and TCP target
+14. exits cleanly when the context is canceled
 
 Current limitation: service requests are one-hop only. If `egress` is set, it must match the connected server's `node_id`; multi-hop routing to another egress is not implemented yet.
 
@@ -403,8 +404,8 @@ docs/                  design documentation
 ## Near-Term Next Steps
 
 1. Improve active connection shutdown and goroutine lifecycle tracking.
-2. Add clearer local TCP behavior when target setup fails.
-3. Add per-client target access policy.
-5. Add reconnect behavior for the shared client QUIC connection.
-6. Consider configurable log level/log format and timeout settings.
-7. Later: multi-hop forwarding and end-to-end encrypted payload frames.
+2. Add clearer local TCP behavior when service setup/dialing fails.
+3. Add reconnect behavior for the shared client QUIC connection.
+4. Consider configurable log level/log format and timeout settings.
+5. Add richer service selection semantics for future multi-egress/load-balanced service routing.
+6. Later: multi-hop forwarding and end-to-end encrypted payload frames.
