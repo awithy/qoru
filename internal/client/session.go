@@ -183,13 +183,31 @@ func (s *reconnectingUpstreamSession) connection(ctx context.Context) (*quic.Con
 		return nil, fmt.Errorf("upstream reconnect backoff active until %s", s.nextDial.Format(time.RFC3339Nano))
 	}
 
+	hadFailures := s.backoffFailCount > 0
+	if hadFailures && s.logger != nil {
+		s.logger.Info("upstream reconnecting", "server_id", s.server.ID, "addr", s.server.Address)
+	}
+
 	conn, err := s.dial(ctx, s.nodeID, s.identity, *s.server, s.logger)
 	if err != nil {
 		s.recordDialFailure(now, err)
+		if s.logger != nil {
+			s.logger.Warn(
+				"upstream reconnect failed",
+				"server_id", s.server.ID,
+				"addr", s.server.Address,
+				"backoff", s.nextDial.Sub(now).String(),
+				"next_attempt", s.nextDial.Format(time.RFC3339Nano),
+				"error", err,
+			)
+		}
 		return nil, err
 	}
 	s.conn = conn
 	s.resetDialBackoff()
+	if hadFailures && s.logger != nil {
+		s.logger.Info("upstream reconnect succeeded", "server_id", s.server.ID, "addr", s.server.Address)
+	}
 	return conn, nil
 }
 
@@ -213,6 +231,9 @@ func (s *reconnectingUpstreamSession) dropConnection(conn *quic.Conn, reason str
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn == conn {
+		if s.logger != nil {
+			s.logger.Warn("upstream connection dropped", "server_id", s.server.ID, "addr", s.server.Address, "reason", reason)
+		}
 		_ = s.conn.CloseWithError(0, reason)
 		s.conn = nil
 	}
