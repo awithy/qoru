@@ -46,8 +46,11 @@ func TestClientTLSConfig(t *testing.T) {
 	if tlsConfig.RootCAs == nil {
 		t.Fatal("expected RootCAs to be set")
 	}
-	if tlsConfig.ServerName != "server-1" {
-		t.Fatalf("expected ServerName server-1, got %q", tlsConfig.ServerName)
+	if !tlsConfig.InsecureSkipVerify {
+		t.Fatal("expected custom peer certificate verification to be enabled")
+	}
+	if tlsConfig.VerifyPeerCertificate == nil {
+		t.Fatal("expected VerifyPeerCertificate to be set")
 	}
 	if len(tlsConfig.Certificates) != 1 {
 		t.Fatalf("expected one certificate, got %d", len(tlsConfig.Certificates))

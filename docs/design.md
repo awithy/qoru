@@ -173,24 +173,17 @@ Current behavior:
 - private CA loaded from configured `identity.ca`
 - system trust store is not used
 - server requires and verifies client certificates
-- client verifies the server certificate against the configured server identity
+- client verifies the server certificate chain and qoru node URI SAN against the configured server identity
 - ALPN is set to `qoru/1`
 
-The current identity model uses certificate SANs. For development, certificates include DNS SANs such as:
+The current identity model requires SPIFFE-style URI SAN identities:
 
 ```text
-DNS:client-1
-DNS:server-1
-IP:127.0.0.1
+URI:spiffe://qoru/node/client-1
+URI:spiffe://qoru/node/server-1
 ```
 
-No real DNS lookup is required for `server-1`; the name is used as the expected certificate identity.
-
-Longer term, qoru may move to URI SAN identities such as:
-
-```text
-spiffe://qoru/node/server-1
-```
+The node ID is extracted from the URI SAN and used as the authenticated peer identity. DNS SANs and certificate Common Names are not used for qoru node identity.
 
 ## ALPN
 

@@ -69,8 +69,8 @@ EOF
   rm -f "$OUT_DIR/$name.csr"
 }
 
-gen_node_cert "client-1" "DNS:client-1"
-gen_node_cert "server-1" "DNS:server-1,IP:127.0.0.1"
+gen_node_cert "client-1" "URI:spiffe://qoru/node/client-1"
+gen_node_cert "server-1" "URI:spiffe://qoru/node/server-1"
 
 rm -f "$OUT_DIR"/*.cnf "$OUT_DIR"/*.srl
 

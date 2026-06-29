@@ -15,7 +15,8 @@ func TestPeerNodeIDUsesSPIFFEURISAN(t *testing.T) {
 	}
 	state := tls.ConnectionState{PeerCertificates: []*x509.Certificate{{
 		URIs:     []*url.URL{uri},
-		DNSNames: []string{"dns-fallback"},
+		DNSNames: []string{"ignored-dns-name"},
+		Subject:  pkix.Name{CommonName: "ignored-cn"},
 	}}}
 
 	id, err := PeerNodeID(state)
@@ -27,27 +28,17 @@ func TestPeerNodeIDUsesSPIFFEURISAN(t *testing.T) {
 	}
 }
 
-func TestPeerNodeIDUsesDNSName(t *testing.T) {
+func TestPeerNodeIDRejectsDNSNameWithoutSPIFFEURI(t *testing.T) {
 	state := tls.ConnectionState{PeerCertificates: []*x509.Certificate{{DNSNames: []string{"client-1"}}}}
-
-	id, err := PeerNodeID(state)
-	if err != nil {
-		t.Fatalf("expected peer node id, got %v", err)
-	}
-	if id != "client-1" {
-		t.Fatalf("expected client-1, got %q", id)
+	if _, err := PeerNodeID(state); err == nil {
+		t.Fatal("expected DNS-only identity to be rejected")
 	}
 }
 
-func TestPeerNodeIDUsesCommonNameFallback(t *testing.T) {
+func TestPeerNodeIDRejectsCommonNameWithoutSPIFFEURI(t *testing.T) {
 	state := tls.ConnectionState{PeerCertificates: []*x509.Certificate{{Subject: pkix.Name{CommonName: "client-1"}}}}
-
-	id, err := PeerNodeID(state)
-	if err != nil {
-		t.Fatalf("expected peer node id, got %v", err)
-	}
-	if id != "client-1" {
-		t.Fatalf("expected client-1, got %q", id)
+	if _, err := PeerNodeID(state); err == nil {
+		t.Fatal("expected CN-only identity to be rejected")
 	}
 }
 

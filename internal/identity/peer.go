@@ -24,15 +24,5 @@ func PeerNodeID(state tls.ConnectionState) (string, error) {
 		}
 	}
 
-	for _, name := range cert.DNSNames {
-		if name != "" {
-			return name, nil
-		}
-	}
-
-	if cert.Subject.CommonName != "" {
-		return cert.Subject.CommonName, nil
-	}
-
-	return "", fmt.Errorf("peer certificate does not contain a node identity")
+	return "", fmt.Errorf("peer certificate does not contain a SPIFFE node identity")
 }
