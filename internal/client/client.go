@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -34,6 +35,17 @@ func WithStartedFunc(fn func(addr string)) Option {
 type forwardListener struct {
 	forward  config.ForwardConfig
 	listener net.Listener
+}
+
+type ConnectRejectedError struct {
+	Message string
+}
+
+func (e *ConnectRejectedError) Error() string {
+	if e.Message == "" {
+		return "connect rejected"
+	}
+	return "connect rejected: " + e.Message
 }
 
 func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOptions ...Option) error {
@@ -168,7 +180,12 @@ func handleLocalConnection(ctx context.Context, conn *quic.Conn, service, egress
 	stream, err := OpenTCPStream(ctx, conn, service, egress)
 	if err != nil {
 		if logger != nil {
-			logger.Error("open tcp stream failed", "service", service, "egress", egress, "error", err)
+			var rejected *ConnectRejectedError
+			if errors.As(err, &rejected) {
+				logger.Warn("tcp service rejected", "service", service, "egress", egress, "error", err)
+			} else {
+				logger.Error("open tcp stream failed", "service", service, "egress", egress, "error", err)
+			}
 		}
 		return
 	}
@@ -219,10 +236,7 @@ func OpenTCPStream(ctx context.Context, conn *quic.Conn, service, egress string)
 	}
 	if !resp.OK {
 		_ = stream.Close()
-		if resp.Message == "" {
-			return nil, fmt.Errorf("connect failed")
-		}
-		return nil, fmt.Errorf("connect failed: %s", resp.Message)
+		return nil, &ConnectRejectedError{Message: resp.Message}
 	}
 
 	return stream, nil

@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -176,8 +177,12 @@ func TestOpenTCPStreamReturnsTargetDialError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected target dial error")
 	}
-	if !strings.Contains(err.Error(), "connect failed") {
-		t.Fatalf("unexpected error: %v", err)
+	var rejected *ConnectRejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("expected ConnectRejectedError, got %T: %v", err, err)
+	}
+	if rejected.Message == "" {
+		t.Fatal("expected rejection message")
 	}
 
 	cancelAndWaitForServer(t, cancel, serverErr)
@@ -203,8 +208,12 @@ func TestOpenTCPStreamReturnsTargetPolicyError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected target policy error")
 	}
-	if !strings.Contains(err.Error(), "not allowed") {
-		t.Fatalf("unexpected error: %v", err)
+	var rejected *ConnectRejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("expected ConnectRejectedError, got %T: %v", err, err)
+	}
+	if !strings.Contains(rejected.Message, "not allowed") {
+		t.Fatalf("unexpected rejection message: %q", rejected.Message)
 	}
 
 	cancelAndWaitForServer(t, cancel, serverErr)
