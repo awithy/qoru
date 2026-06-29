@@ -1,6 +1,6 @@
 # qoru
 
-`qoru` is an experimental QUIC-based network relay/proxy, written in Go.
+`qoru` is an experimental QUIC-based network relay/proxy, written in Go.  The name is not meaningful.
 
 The long-term goal is to create a small authenticated relay overlay where clients and relay nodes can forward traffic across one or more hops while preserving end-to-end payload confidentiality from intermediary relays.
 
