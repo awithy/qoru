@@ -70,6 +70,47 @@ func TestRunListensAndProxiesLocalTCP(t *testing.T) {
 	cancelAndWaitForServer(t, serverCancel, serverErr)
 }
 
+func TestRunListensOnMultipleForwards(t *testing.T) {
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	addr, serverErr := startTestServer(t, serverCtx, logger, nil)
+	targetA := startEchoTCPServer(t)
+	targetB := startEchoTCPServer(t)
+
+	clientCtx, clientCancel := context.WithCancel(context.Background())
+	defer clientCancel()
+	clientCfg := testClientConfig(addr, targetA.Addr().String())
+	clientCfg.TCPForwards = []config.TCPForwardConfig{
+		{Listen: "127.0.0.1:0", Target: targetA.Addr().String()},
+		{Listen: "127.0.0.1:0", Target: targetB.Addr().String()},
+	}
+
+	started := make(chan string, 2)
+	clientErr := make(chan error, 1)
+	go func() {
+		clientErr <- Run(clientCtx, clientCfg, logger, WithStartedFunc(func(addr string) { started <- addr }))
+	}()
+
+	clientAddrA := waitForClientAddr(t, started, clientErr)
+	clientAddrB := waitForClientAddr(t, started, clientErr)
+
+	assertEcho(t, clientAddrA, "one!")
+	assertEcho(t, clientAddrB, "two!")
+
+	clientCancel()
+	select {
+	case err := <-clientErr:
+		if err != nil {
+			t.Fatalf("expected clean client shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for client shutdown")
+	}
+	cancelAndWaitForServer(t, serverCancel, serverErr)
+}
+
 func TestConnectTCPProxiesBytesToTarget(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -108,6 +149,39 @@ func TestConnectTCPProxiesBytesToTarget(t *testing.T) {
 	}
 
 	cancelAndWaitForServer(t, cancel, serverErr)
+}
+
+func waitForClientAddr(t *testing.T, started <-chan string, clientErr <-chan error) string {
+	t.Helper()
+	select {
+	case addr := <-started:
+		return addr
+	case err := <-clientErr:
+		t.Fatalf("client exited before starting: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for client to start")
+	}
+	panic("unreachable")
+}
+
+func assertEcho(t *testing.T, addr, msg string) {
+	t.Helper()
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial client listener: %v", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.Write([]byte(msg)); err != nil {
+		t.Fatalf("write to local connection: %v", err)
+	}
+	buf := make([]byte, len(msg))
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		t.Fatalf("read from local connection: %v", err)
+	}
+	if string(buf) != msg {
+		t.Fatalf("expected echo %q, got %q", msg, string(buf))
+	}
 }
 
 func startTestServer(t *testing.T, ctx context.Context, logger *slog.Logger, onConnect func(protocol.ConnectTCPRequest)) (string, <-chan error) {

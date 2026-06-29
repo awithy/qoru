@@ -23,6 +23,11 @@ func WithStartedFunc(fn func(addr string)) Option {
 	}
 }
 
+type forwardListener struct {
+	forward  config.TCPForwardConfig
+	listener net.Listener
+}
+
 func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOptions ...Option) error {
 	if err := config.ValidateClient(cfg); err != nil {
 		return err
@@ -33,33 +38,63 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 		apply(&opts)
 	}
 
-	forward := cfg.TCPForwards[0]
-	listener, err := net.Listen("tcp", forward.Listen)
-	if err != nil {
-		return err
+	listeners := make([]forwardListener, 0, len(cfg.TCPForwards))
+	for _, forward := range cfg.TCPForwards {
+		listener, err := net.Listen("tcp", forward.Listen)
+		if err != nil {
+			closeListeners(listeners)
+			return err
+		}
+		listeners = append(listeners, forwardListener{forward: forward, listener: listener})
 	}
-	defer listener.Close()
+	defer closeListeners(listeners)
 
-	addr := listener.Addr().String()
-	if logger != nil {
-		logger.Info("client listening", "node_id", cfg.NodeID, "addr", addr, "target", forward.Target)
-	}
-	if opts.started != nil {
-		opts.started(addr)
+	for _, item := range listeners {
+		addr := item.listener.Addr().String()
+		if logger != nil {
+			logger.Info("client listening", "node_id", cfg.NodeID, "addr", addr, "target", item.forward.Target)
+		}
+		if opts.started != nil {
+			opts.started(addr)
+		}
 	}
 
 	go func() {
 		<-ctx.Done()
-		_ = listener.Close()
+		closeListeners(listeners)
 	}()
 
+	errCh := make(chan error, len(listeners))
+	for _, item := range listeners {
+		go acceptForward(ctx, cfg, item.forward, item.listener, logger, errCh)
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-errCh:
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+}
+
+func closeListeners(listeners []forwardListener) {
+	for _, item := range listeners {
+		_ = item.listener.Close()
+	}
+}
+
+func acceptForward(ctx context.Context, cfg *config.Config, forward config.TCPForwardConfig, listener net.Listener, logger *slog.Logger, errCh chan<- error) {
 	for {
 		localConn, err := listener.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil
+				return
 			}
-			return err
+			errCh <- err
+			return
 		}
 		go handleLocalConnection(ctx, cfg, forward.Target, localConn, logger)
 	}
