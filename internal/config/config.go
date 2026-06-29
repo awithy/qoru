@@ -29,8 +29,9 @@ type Config struct {
 }
 
 type AllowedTargetConfig struct {
-	Protocol string `yaml:"protocol"`
-	Address  string `yaml:"address"`
+	Protocol string   `yaml:"protocol"`
+	Address  string   `yaml:"address"`
+	Peers    []string `yaml:"peers,omitempty"`
 }
 
 type IdentityConfig struct {

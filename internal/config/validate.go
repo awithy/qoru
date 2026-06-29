@@ -87,6 +87,11 @@ func ValidateServer(cfg *Config) error {
 		if _, _, err := net.SplitHostPort(target.Address); err != nil {
 			return fmt.Errorf("allowed_targets[%d].address must be host:port: %w", i, err)
 		}
+		for j, peer := range target.Peers {
+			if peer == "" {
+				return fmt.Errorf("allowed_targets[%d].peers[%d] is required", i, j)
+			}
+		}
 	}
 	return nil
 }

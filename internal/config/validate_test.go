@@ -102,6 +102,14 @@ func TestValidateServerRejectsInvalidAllowedTargetAddress(t *testing.T) {
 	}
 }
 
+func TestValidateServerRejectsEmptyAllowedTargetPeer(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.AllowedTargets = []AllowedTargetConfig{{Protocol: "tcp", Address: "127.0.0.1:9000", Peers: []string{""}}}
+	if err := ValidateServer(&cfg); err == nil {
+		t.Fatal("expected empty allowed target peer to be rejected")
+	}
+}
+
 func TestValidateForMode(t *testing.T) {
 	client := validClientConfig()
 	server := validServerConfig()

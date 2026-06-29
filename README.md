@@ -135,6 +135,8 @@ listen: 127.0.0.1:4433
 allowed_targets:
   - protocol: tcp
     address: 127.0.0.1:9000
+    peers:
+      - client-1
 ```
 
 ## Security Model

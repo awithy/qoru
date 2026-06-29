@@ -130,6 +130,8 @@ listen: 127.0.0.1:4433
 allowed_targets:
   - protocol: tcp
     address: 127.0.0.1:9000
+    peers:
+      - client-1
 ```
 
 ## Config Validation
@@ -157,7 +159,7 @@ Server required fields:
 
 Optional server fields:
 
-- `allowed_targets`: protocol-aware exact targets the server may dial. Currently `protocol: tcp` is enforced; `protocol: udp` is accepted by config for future UDP support. If omitted or empty, the current development behavior allows any syntactically valid TCP target.
+- `allowed_targets`: protocol-aware exact targets the server may dial. Currently `protocol: tcp` is enforced; `protocol: udp` is accepted by config for future UDP support. Each entry may include `peers`; if omitted or empty, any authenticated peer may use that target. If `allowed_targets` is omitted or empty, the current development behavior allows any syntactically valid TCP target.
 
 ## TLS and Identity
 
@@ -328,7 +330,7 @@ The current server runtime lives in `internal/server`.
 11. if OK, proxies bytes between the QUIC stream and TCP target
 12. exits cleanly when the context is canceled
 
-Current limitation: target access policy is target-only. If `allowed_targets` is empty, any authenticated client can request any syntactically valid TCP target address reachable from the server. Per-client policy is not implemented yet.
+Current limitation: access policy is exact target and peer based. If `allowed_targets` is empty, any authenticated client can request any syntactically valid TCP target address reachable from the server.
 
 ## CLI Runtime Wiring
 

@@ -108,6 +108,8 @@ listen: $SERVER_ADDR
 allowed_targets:
   - protocol: tcp
     address: $TARGET_ADDR
+    peers:
+      - client-1
 EOF
 
 cat >"$tmpdir/client.yaml" <<EOF

@@ -57,7 +57,7 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 		opts.connectTCPRequest(req)
 	}
 
-	if err := authorizeTCPTarget(cfg, req.Target); err != nil {
+	if err := authorizeTCPTarget(cfg, peerID, req.Target); err != nil {
 		if logger != nil {
 			logger.Warn("tcp target denied", "peer_id", peerID, "target", req.Target, "error", err)
 		}
