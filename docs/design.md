@@ -20,7 +20,7 @@ Implemented today:
 - TLS 1.3 / mTLS identity loading from configured cert/key/CA files.
 - QUIC transport using `quic-go`.
 - Custom binary control protocol.
-- Client-side local TCP listeners from `tcp_forwards`.
+- Client-side local TCP listeners from `forwards`.
 - One shared QUIC connection from client to server.
 - One QUIC stream per proxied local TCP connection.
 - Multiple local TCP forwards.
@@ -106,8 +106,9 @@ server:
   id: server-1
   address: 127.0.0.1:4433
 
-tcp_forwards:
-  - listen: 127.0.0.1:15432
+forwards:
+  - protocol: tcp
+    listen: 127.0.0.1:15432
     target: 127.0.0.1:9000
 ```
 
@@ -147,8 +148,8 @@ Client required fields:
 - `mode: client`
 - `server.id`
 - `server.address`
-- at least one `tcp_forwards` entry
-- each forward requires `listen` and `target`
+- at least one `forwards` entry
+- each forward requires `protocol: tcp`, `listen`, and `target`
 
 Server required fields:
 
@@ -291,7 +292,7 @@ The current client runtime lives in `internal/client`.
 
 1. validates client config
 2. establishes one QUIC/mTLS connection to the configured server
-3. binds one local TCP listener per configured `tcp_forwards` entry
+3. binds one local TCP listener per configured `forwards` entry
 4. starts accept loops for all listeners
 5. for each local TCP connection, opens a new QUIC stream on the shared connection
 6. sends `ConnectTCPRequest`

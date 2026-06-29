@@ -26,7 +26,7 @@ func TestRunListensAndProxiesLocalTCP(t *testing.T) {
 	clientCtx, clientCancel := context.WithCancel(context.Background())
 	defer clientCancel()
 	clientCfg := testClientConfig(addr, targetListener.Addr().String())
-	clientCfg.TCPForwards[0].Listen = "127.0.0.1:0"
+	clientCfg.Forwards[0].Listen = "127.0.0.1:0"
 
 	clientStarted := make(chan string, 1)
 	clientErr := make(chan error, 1)
@@ -84,9 +84,9 @@ func TestRunListensOnMultipleForwards(t *testing.T) {
 	clientCtx, clientCancel := context.WithCancel(context.Background())
 	defer clientCancel()
 	clientCfg := testClientConfig(addr, targetA.Addr().String())
-	clientCfg.TCPForwards = []config.TCPForwardConfig{
-		{Listen: "127.0.0.1:0", Target: targetA.Addr().String()},
-		{Listen: "127.0.0.1:0", Target: targetB.Addr().String()},
+	clientCfg.Forwards = []config.ForwardConfig{
+		{Protocol: "tcp", Listen: "127.0.0.1:0", Target: targetA.Addr().String()},
+		{Protocol: "tcp", Listen: "127.0.0.1:0", Target: targetB.Addr().String()},
 	}
 
 	started := make(chan string, 2)
@@ -150,7 +150,7 @@ func TestOpenTCPStreamReturnsTargetDialError(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	addr, serverErr := startTestServer(t, ctx, logger, nil)
-	clientCfg := testClientConfig(addr, "localhost")
+	clientCfg := testClientConfig(addr, "127.0.0.1:1")
 
 	conn, err := Connect(ctx, clientCfg, logger)
 	if err != nil {
@@ -346,9 +346,10 @@ func testClientConfig(serverAddr, targetAddr string) *config.Config {
 		Mode:     config.ModeClient,
 		Identity: config.IdentityConfig{Cert: "../../dev/certs/client-1.crt", Key: "../../dev/certs/client-1.key", CA: "../../dev/certs/ca.crt"},
 		Server:   &config.ServerConfig{ID: "server-1", Address: serverAddr},
-		TCPForwards: []config.TCPForwardConfig{{
-			Listen: "127.0.0.1:15432",
-			Target: targetAddr,
+		Forwards: []config.ForwardConfig{{
+			Protocol: "tcp",
+			Listen:   "127.0.0.1:15432",
+			Target:   targetAddr,
 		}},
 	}
 }

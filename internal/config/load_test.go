@@ -18,8 +18,9 @@ identity:
 server:
   id: server-1
   address: 127.0.0.1:4433
-tcp_forwards:
-  - listen: 127.0.0.1:15432
+forwards:
+  - protocol: tcp
+    listen: 127.0.0.1:15432
     target: 127.0.0.1:5432
 `
 	if err := os.WriteFile(path, []byte(input), 0o644); err != nil {
@@ -30,7 +31,7 @@ tcp_forwards:
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if cfg.NodeID != "client-1" || cfg.Server == nil || len(cfg.TCPForwards) != 1 {
+	if cfg.NodeID != "client-1" || cfg.Server == nil || len(cfg.Forwards) != 1 {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 }

@@ -112,8 +112,9 @@ server:
   id: server-1
   address: 127.0.0.1:4433
 
-tcp_forwards:
-  - listen: 127.0.0.1:15432
+forwards:
+  - protocol: tcp
+    listen: 127.0.0.1:15432
     target: 127.0.0.1:9000
 ```
 

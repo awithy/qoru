@@ -23,7 +23,7 @@ type Config struct {
 	Server *ServerConfig `yaml:"server,omitempty"`
 	Listen string        `yaml:"listen,omitempty"`
 
-	TCPForwards []TCPForwardConfig `yaml:"tcp_forwards,omitempty"`
+	Forwards []ForwardConfig `yaml:"forwards,omitempty"`
 
 	AllowedTargets []AllowedTargetConfig `yaml:"allowed_targets,omitempty"`
 }
@@ -44,9 +44,10 @@ type ServerConfig struct {
 	Address string `yaml:"address"`
 }
 
-type TCPForwardConfig struct {
-	Listen string `yaml:"listen"`
-	Target string `yaml:"target"`
+type ForwardConfig struct {
+	Protocol string `yaml:"protocol"`
+	Listen   string `yaml:"listen"`
+	Target   string `yaml:"target"`
 }
 
 func ResolvePath(explicit string) (string, bool) {

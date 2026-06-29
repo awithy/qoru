@@ -28,7 +28,7 @@ func WithStartedFunc(fn func(addr string)) Option {
 }
 
 type forwardListener struct {
-	forward  config.TCPForwardConfig
+	forward  config.ForwardConfig
 	listener net.Listener
 }
 
@@ -48,8 +48,8 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 	}
 	defer conn.CloseWithError(0, "done")
 
-	listeners := make([]forwardListener, 0, len(cfg.TCPForwards))
-	for _, forward := range cfg.TCPForwards {
+	listeners := make([]forwardListener, 0, len(cfg.Forwards))
+	for _, forward := range cfg.Forwards {
 		listener, err := net.Listen("tcp", forward.Listen)
 		if err != nil {
 			closeListeners(listeners)
@@ -104,7 +104,7 @@ func closeListeners(listeners []forwardListener) {
 	}
 }
 
-func acceptForward(ctx context.Context, conn *quic.Conn, forward config.TCPForwardConfig, listener net.Listener, logger *slog.Logger, errCh chan<- error) {
+func acceptForward(ctx context.Context, conn *quic.Conn, forward config.ForwardConfig, listener net.Listener, logger *slog.Logger, errCh chan<- error) {
 	for {
 		localConn, err := listener.Accept()
 		if err != nil {

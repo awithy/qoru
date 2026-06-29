@@ -4,11 +4,11 @@ import "testing"
 
 func validClientConfig() Config {
 	return Config{
-		NodeID:      "client-1",
-		Mode:        ModeClient,
-		Identity:    IdentityConfig{Cert: "client.crt", Key: "client.key", CA: "ca.crt"},
-		Server:      &ServerConfig{ID: "server-1", Address: "127.0.0.1:4433"},
-		TCPForwards: []TCPForwardConfig{{Listen: "127.0.0.1:15432", Target: "127.0.0.1:5432"}},
+		NodeID:   "client-1",
+		Mode:     ModeClient,
+		Identity: IdentityConfig{Cert: "client.crt", Key: "client.key", CA: "ca.crt"},
+		Server:   &ServerConfig{ID: "server-1", Address: "127.0.0.1:4433"},
+		Forwards: []ForwardConfig{{Protocol: "tcp", Listen: "127.0.0.1:15432", Target: "127.0.0.1:5432"}},
 	}
 }
 
@@ -38,9 +38,25 @@ func TestValidateClientRejectsWrongMode(t *testing.T) {
 
 func TestValidateClientRejectsMissingForward(t *testing.T) {
 	cfg := validClientConfig()
-	cfg.TCPForwards = nil
+	cfg.Forwards = nil
 	if err := ValidateClient(&cfg); err == nil {
 		t.Fatal("expected missing forward to be rejected")
+	}
+}
+
+func TestValidateClientRejectsMissingForwardProtocol(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Forwards[0].Protocol = ""
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected missing forward protocol to be rejected")
+	}
+}
+
+func TestValidateClientRejectsUnsupportedForwardProtocol(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Forwards[0].Protocol = "udp"
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected unsupported forward protocol to be rejected")
 	}
 }
 

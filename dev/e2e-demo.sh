@@ -120,8 +120,9 @@ identity:
 server:
   id: server-1
   address: $SERVER_ADDR
-tcp_forwards:
-  - listen: $CLIENT_ADDR
+forwards:
+  - protocol: tcp
+    listen: $CLIENT_ADDR
     target: $TARGET_ADDR
 EOF
 

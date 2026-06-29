@@ -38,15 +38,27 @@ func ValidateClient(cfg *Config) error {
 	if cfg.Server.Address == "" {
 		return fmt.Errorf("server.address is required for client mode")
 	}
-	if len(cfg.TCPForwards) == 0 {
-		return fmt.Errorf("at least one tcp_forwards entry is required for client mode")
+	if len(cfg.Forwards) == 0 {
+		return fmt.Errorf("at least one forwards entry is required for client mode")
 	}
-	for i, fwd := range cfg.TCPForwards {
+	for i, fwd := range cfg.Forwards {
+		if fwd.Protocol == "" {
+			return fmt.Errorf("forwards[%d].protocol is required", i)
+		}
+		if fwd.Protocol != "tcp" {
+			return fmt.Errorf("forwards[%d].protocol must be tcp", i)
+		}
 		if fwd.Listen == "" {
-			return fmt.Errorf("tcp_forwards[%d].listen is required", i)
+			return fmt.Errorf("forwards[%d].listen is required", i)
+		}
+		if _, _, err := net.SplitHostPort(fwd.Listen); err != nil {
+			return fmt.Errorf("forwards[%d].listen must be host:port: %w", i, err)
 		}
 		if fwd.Target == "" {
-			return fmt.Errorf("tcp_forwards[%d].target is required", i)
+			return fmt.Errorf("forwards[%d].target is required", i)
+		}
+		if _, _, err := net.SplitHostPort(fwd.Target); err != nil {
+			return fmt.Errorf("forwards[%d].target must be host:port: %w", i, err)
 		}
 	}
 	return nil
