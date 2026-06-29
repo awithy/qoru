@@ -284,16 +284,19 @@ The setup/control phase is framed. Once the server confirms success, the remaini
 
 Future multi-hop/end-to-end encryption will likely require framed encrypted data messages, but the current one-hop TCP implementation keeps raw bytes after the initial setup handshake.
 
-## Timeouts
+## Timeouts and Reconnect Backoff
 
-Timeouts are currently hardcoded.
+Timeouts and reconnect policy are currently hardcoded.
 
 - client QUIC dial timeout: `10s`
 - server TCP target dial timeout: `10s`
+- client upstream reconnect backoff after failed dial attempts: `500ms`, `1s`, `2s`, `4s`, `8s`, `16s`, capped at `16s`
 
 Server service target dialing uses `net.Dialer.DialContext` and validates configured service targets with `net.SplitHostPort` before dialing. DNS lookup and dial errors are reported through `ConnectResponse`.
 
-Timeouts are not yet configurable.
+Client reconnect is on demand. qoru does not run a background reconnect loop and does not sleep inside local TCP handlers during backoff. If a local TCP connection arrives while the selected upstream is still in reconnect backoff, stream setup fails fast and the local TCP connection is closed without payload injection.
+
+Timeouts and reconnect policy are not yet configurable.
 
 ## Logging
 
@@ -332,7 +335,8 @@ Relevant client package files:
 - `stream.go` contains QUIC dialing and the `ConnectRequest`/`ConnectResponse` stream setup handshake.
 - `proxy.go` contains byte proxying between local TCP connections and QUIC streams.
 
-Current limitation: reconnect is on demand and applies only to future local TCP connections. Active proxied TCP connections are bound to streams on the old QUIC connection; if that connection dies, those TCP connections are closed rather than resumed.
+Current limitation: reconnect is on demand and applies only to future local TCP connections. Active proxied TCP connections are bound to streams on the old QUIC connection; if that connection dies, those TCP connections are closed rather than resumed. Failed reconnect dials use exponential backoff capped at `16s`; successful reconnect resets the backoff state.
+
 ## Server Runtime
 
 The current server runtime lives in `internal/server`.
@@ -429,7 +433,7 @@ docs/                  design documentation
 
 1. Improve active connection shutdown and goroutine lifecycle tracking.
 2. Add clearer local TCP behavior when service setup/dialing fails.
-3. Improve reconnect behavior with backoff and clearer server-side session handling.
+3. Improve reconnect observability and clearer server-side session handling.
 4. Consider configurable log level/log format and timeout settings.
 5. Add richer service selection semantics for future multi-egress/load-balanced service routing.
 6. Later: multi-hop forwarding and end-to-end encrypted payload frames.

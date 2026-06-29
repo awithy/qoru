@@ -174,7 +174,7 @@ QUIC mTLS                        = hop-by-hop, peer -> peer
 
 The current implementation has QUIC/mTLS hop-by-hop encryption and authentication. End-to-end application payload encryption for multi-hop relay paths is not implemented yet.
 
-If the client-side upstream QUIC connection is lost, active proxied TCP connections on that connection are closed. The qoru client keeps its local listeners running and reconnects on demand for later local TCP connections.
+If the client-side upstream QUIC connection is lost, active proxied TCP connections on that connection are closed. The qoru client keeps its local listeners running and reconnects on demand for later local TCP connections. Failed reconnect dials use exponential backoff: `500ms`, `1s`, `2s`, `4s`, `8s`, `16s`, capped at `16s`. During backoff, new local TCP connections fail fast without qoru writing diagnostic bytes into the TCP stream.
 
 For the current one-hop path:
 
@@ -195,7 +195,7 @@ Near-term:
 
 - Improve active connection shutdown behavior.
 - Improve service dial failure behavior for local TCP clients.
-- Add more robust reconnect behavior, including backoff and clearer server-side session handling.
+- Add better reconnect observability and clearer server-side session handling.
 - Add richer service selection semantics for future multi-egress/load-balanced service routing.
 
 Longer-term:
