@@ -26,6 +26,7 @@ func handleConnection(ctx context.Context, cfg *config.Config, conn *quic.Conn, 
 	}
 	if logger != nil {
 		logger.Info("peer connected", "peer_id", peerID)
+		defer logger.Info("peer disconnected", "peer_id", peerID)
 	}
 
 	var streamWG sync.WaitGroup
@@ -120,4 +121,8 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 	}
 
 	proxyTCP(stream, targetConn)
+
+	if logger != nil {
+		logger.Info("tcp proxy closed", "peer_id", peerID, "service", svc.Name, "target", svc.Target)
+	}
 }
