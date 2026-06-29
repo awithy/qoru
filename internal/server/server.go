@@ -11,8 +11,8 @@ import (
 )
 
 type options struct {
-	started           func(addr string)
-	connectTCPRequest func(req protocol.ConnectTCPRequest)
+	started        func(addr string)
+	connectRequest func(req protocol.ConnectRequest)
 }
 
 type Option func(*options)
@@ -23,9 +23,9 @@ func WithStartedFunc(fn func(addr string)) Option {
 	}
 }
 
-func WithConnectTCPRequestFunc(fn func(req protocol.ConnectTCPRequest)) Option {
+func WithConnectRequestFunc(fn func(req protocol.ConnectRequest)) Option {
 	return func(opts *options) {
-		opts.connectTCPRequest = fn
+		opts.connectRequest = fn
 	}
 }
 

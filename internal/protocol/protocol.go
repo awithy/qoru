@@ -7,16 +7,17 @@ import (
 )
 
 const (
-	Version         uint8 = 1
-	MaxPayloadSize      = 64*1024 - 1
-	MaxTargetLength     = 4096
+	Version           uint8 = 1
+	MaxPayloadSize          = 64*1024 - 1
+	MaxProtocolLength       = 32
+	MaxTargetLength         = 4096
 )
 
 type MessageType uint8
 
 const (
-	TypeConnectTCP         MessageType = 1
-	TypeConnectTCPResponse MessageType = 2
+	TypeConnectRequest  MessageType = 1
+	TypeConnectResponse MessageType = 2
 )
 
 const (
@@ -30,11 +31,12 @@ type Frame struct {
 	Payload []byte
 }
 
-type ConnectTCPRequest struct {
-	Target string
+type ConnectRequest struct {
+	Protocol string
+	Target   string
 }
 
-type ConnectTCPResponse struct {
+type ConnectResponse struct {
 	OK      bool
 	Message string
 }
@@ -80,7 +82,13 @@ func ReadFrame(r io.Reader) (Frame, error) {
 	return Frame{Version: version, Type: MessageType(header[1]), Payload: payload}, nil
 }
 
-func WriteConnectTCPRequest(w io.Writer, req ConnectTCPRequest) error {
+func WriteConnectRequest(w io.Writer, req ConnectRequest) error {
+	if req.Protocol == "" {
+		return fmt.Errorf("protocol is required")
+	}
+	if len(req.Protocol) > MaxProtocolLength {
+		return fmt.Errorf("protocol too long: %d > %d", len(req.Protocol), MaxProtocolLength)
+	}
 	if req.Target == "" {
 		return fmt.Errorf("target is required")
 	}
@@ -88,40 +96,56 @@ func WriteConnectTCPRequest(w io.Writer, req ConnectTCPRequest) error {
 		return fmt.Errorf("target too long: %d > %d", len(req.Target), MaxTargetLength)
 	}
 
-	payload := make([]byte, 2+len(req.Target))
-	binary.BigEndian.PutUint16(payload[:2], uint16(len(req.Target)))
-	copy(payload[2:], req.Target)
+	payload := make([]byte, 1+len(req.Protocol)+2+len(req.Target))
+	payload[0] = uint8(len(req.Protocol))
+	copy(payload[1:], req.Protocol)
+	targetOffset := 1 + len(req.Protocol)
+	binary.BigEndian.PutUint16(payload[targetOffset:targetOffset+2], uint16(len(req.Target)))
+	copy(payload[targetOffset+2:], req.Target)
 
-	return WriteFrame(w, TypeConnectTCP, payload)
+	return WriteFrame(w, TypeConnectRequest, payload)
 }
 
-func ReadConnectTCPRequest(r io.Reader) (ConnectTCPRequest, error) {
+func ReadConnectRequest(r io.Reader) (ConnectRequest, error) {
 	frame, err := ReadFrame(r)
 	if err != nil {
-		return ConnectTCPRequest{}, err
+		return ConnectRequest{}, err
 	}
-	if frame.Type != TypeConnectTCP {
-		return ConnectTCPRequest{}, fmt.Errorf("unexpected message type %d", frame.Type)
+	if frame.Type != TypeConnectRequest {
+		return ConnectRequest{}, fmt.Errorf("unexpected message type %d", frame.Type)
 	}
-	if len(frame.Payload) < 2 {
-		return ConnectTCPRequest{}, fmt.Errorf("malformed connect tcp payload: missing target length")
+	if len(frame.Payload) < 3 {
+		return ConnectRequest{}, fmt.Errorf("malformed connect payload")
 	}
 
-	targetLen := int(binary.BigEndian.Uint16(frame.Payload[:2]))
+	protocolLen := int(frame.Payload[0])
+	if protocolLen == 0 {
+		return ConnectRequest{}, fmt.Errorf("protocol is required")
+	}
+	if protocolLen > MaxProtocolLength {
+		return ConnectRequest{}, fmt.Errorf("protocol too long: %d > %d", protocolLen, MaxProtocolLength)
+	}
+	if len(frame.Payload) < 1+protocolLen+2 {
+		return ConnectRequest{}, fmt.Errorf("malformed connect payload: missing target length")
+	}
+
+	protocol := string(frame.Payload[1 : 1+protocolLen])
+	targetLenOffset := 1 + protocolLen
+	targetLen := int(binary.BigEndian.Uint16(frame.Payload[targetLenOffset : targetLenOffset+2]))
 	if targetLen == 0 {
-		return ConnectTCPRequest{}, fmt.Errorf("target is required")
+		return ConnectRequest{}, fmt.Errorf("target is required")
 	}
 	if targetLen > MaxTargetLength {
-		return ConnectTCPRequest{}, fmt.Errorf("target too long: %d > %d", targetLen, MaxTargetLength)
+		return ConnectRequest{}, fmt.Errorf("target too long: %d > %d", targetLen, MaxTargetLength)
 	}
-	if len(frame.Payload[2:]) != targetLen {
-		return ConnectTCPRequest{}, fmt.Errorf("malformed connect tcp payload: target length mismatch")
+	if len(frame.Payload[targetLenOffset+2:]) != targetLen {
+		return ConnectRequest{}, fmt.Errorf("malformed connect payload: target length mismatch")
 	}
 
-	return ConnectTCPRequest{Target: string(frame.Payload[2:])}, nil
+	return ConnectRequest{Protocol: protocol, Target: string(frame.Payload[targetLenOffset+2:])}, nil
 }
 
-func WriteConnectTCPResponse(w io.Writer, resp ConnectTCPResponse) error {
+func WriteConnectResponse(w io.Writer, resp ConnectResponse) error {
 	status := ConnectStatusOK
 	if !resp.OK {
 		status = ConnectStatusError
@@ -134,33 +158,33 @@ func WriteConnectTCPResponse(w io.Writer, resp ConnectTCPResponse) error {
 	payload[0] = status
 	binary.BigEndian.PutUint16(payload[1:3], uint16(len(resp.Message)))
 	copy(payload[3:], resp.Message)
-	return WriteFrame(w, TypeConnectTCPResponse, payload)
+	return WriteFrame(w, TypeConnectResponse, payload)
 }
 
-func ReadConnectTCPResponse(r io.Reader) (ConnectTCPResponse, error) {
+func ReadConnectResponse(r io.Reader) (ConnectResponse, error) {
 	frame, err := ReadFrame(r)
 	if err != nil {
-		return ConnectTCPResponse{}, err
+		return ConnectResponse{}, err
 	}
-	if frame.Type != TypeConnectTCPResponse {
-		return ConnectTCPResponse{}, fmt.Errorf("unexpected message type %d", frame.Type)
+	if frame.Type != TypeConnectResponse {
+		return ConnectResponse{}, fmt.Errorf("unexpected message type %d", frame.Type)
 	}
 	if len(frame.Payload) < 3 {
-		return ConnectTCPResponse{}, fmt.Errorf("malformed connect tcp response payload")
+		return ConnectResponse{}, fmt.Errorf("malformed connect response payload")
 	}
 
 	status := frame.Payload[0]
 	messageLen := int(binary.BigEndian.Uint16(frame.Payload[1:3]))
 	if len(frame.Payload[3:]) != messageLen {
-		return ConnectTCPResponse{}, fmt.Errorf("malformed connect tcp response payload: message length mismatch")
+		return ConnectResponse{}, fmt.Errorf("malformed connect response payload: message length mismatch")
 	}
 
 	switch status {
 	case ConnectStatusOK:
-		return ConnectTCPResponse{OK: true, Message: string(frame.Payload[3:])}, nil
+		return ConnectResponse{OK: true, Message: string(frame.Payload[3:])}, nil
 	case ConnectStatusError:
-		return ConnectTCPResponse{OK: false, Message: string(frame.Payload[3:])}, nil
+		return ConnectResponse{OK: false, Message: string(frame.Payload[3:])}, nil
 	default:
-		return ConnectTCPResponse{}, fmt.Errorf("unknown connect tcp response status %d", status)
+		return ConnectResponse{}, fmt.Errorf("unknown connect response status %d", status)
 	}
 }

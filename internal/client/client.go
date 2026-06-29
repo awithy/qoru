@@ -163,12 +163,12 @@ func OpenTCPStream(ctx context.Context, conn *quic.Conn, target string) (*quic.S
 		return nil, err
 	}
 
-	if err := protocol.WriteConnectTCPRequest(stream, protocol.ConnectTCPRequest{Target: target}); err != nil {
+	if err := protocol.WriteConnectRequest(stream, protocol.ConnectRequest{Protocol: "tcp", Target: target}); err != nil {
 		_ = stream.Close()
 		return nil, err
 	}
 
-	resp, err := protocol.ReadConnectTCPResponse(stream)
+	resp, err := protocol.ReadConnectResponse(stream)
 	if err != nil {
 		_ = stream.Close()
 		return nil, err
@@ -176,9 +176,9 @@ func OpenTCPStream(ctx context.Context, conn *quic.Conn, target string) (*quic.S
 	if !resp.OK {
 		_ = stream.Close()
 		if resp.Message == "" {
-			return nil, fmt.Errorf("connect tcp failed")
+			return nil, fmt.Errorf("connect failed")
 		}
-		return nil, fmt.Errorf("connect tcp failed: %s", resp.Message)
+		return nil, fmt.Errorf("connect failed: %s", resp.Message)
 	}
 
 	return stream, nil

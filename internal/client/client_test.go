@@ -162,7 +162,7 @@ func TestOpenTCPStreamReturnsTargetDialError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected target dial error")
 	}
-	if !strings.Contains(err.Error(), "connect tcp failed") {
+	if !strings.Contains(err.Error(), "connect failed") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -201,8 +201,8 @@ func TestConnectTCPProxiesBytesToTarget(t *testing.T) {
 	defer cancel()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	received := make(chan protocol.ConnectTCPRequest, 1)
-	addr, serverErr := startTestServer(t, ctx, logger, func(req protocol.ConnectTCPRequest) { received <- req })
+	received := make(chan protocol.ConnectRequest, 1)
+	addr, serverErr := startTestServer(t, ctx, logger, func(req protocol.ConnectRequest) { received <- req })
 	targetListener := startEchoTCPServer(t)
 
 	clientCfg := testClientConfig(addr, targetListener.Addr().String())
@@ -226,11 +226,14 @@ func TestConnectTCPProxiesBytesToTarget(t *testing.T) {
 
 	select {
 	case req := <-received:
+		if req.Protocol != "tcp" {
+			t.Fatalf("expected protocol tcp, got %q", req.Protocol)
+		}
 		if req.Target != targetListener.Addr().String() {
 			t.Fatalf("expected target %q, got %q", targetListener.Addr().String(), req.Target)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for server to receive connect tcp request")
+		t.Fatal("timed out waiting for server to receive connect request")
 	}
 
 	cancelAndWaitForServer(t, cancel, serverErr)
@@ -283,7 +286,7 @@ func assertEcho(t *testing.T, addr, msg string) {
 	}
 }
 
-func startTestServer(t *testing.T, ctx context.Context, logger *slog.Logger, onConnect func(protocol.ConnectTCPRequest)) (string, <-chan error) {
+func startTestServer(t *testing.T, ctx context.Context, logger *slog.Logger, onConnect func(protocol.ConnectRequest)) (string, <-chan error) {
 	t.Helper()
 	return startTestServerWithConfig(t, ctx, logger, testServerConfig(), onConnect)
 }
@@ -297,13 +300,13 @@ func testServerConfig() *config.Config {
 	}
 }
 
-func startTestServerWithConfig(t *testing.T, ctx context.Context, logger *slog.Logger, serverCfg *config.Config, onConnect func(protocol.ConnectTCPRequest)) (string, <-chan error) {
+func startTestServerWithConfig(t *testing.T, ctx context.Context, logger *slog.Logger, serverCfg *config.Config, onConnect func(protocol.ConnectRequest)) (string, <-chan error) {
 	t.Helper()
 	started := make(chan string, 1)
 	serverErr := make(chan error, 1)
 	options := []server.Option{server.WithStartedFunc(func(addr string) { started <- addr })}
 	if onConnect != nil {
-		options = append(options, server.WithConnectTCPRequestFunc(onConnect))
+		options = append(options, server.WithConnectRequestFunc(onConnect))
 	}
 
 	go func() {

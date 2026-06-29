@@ -27,7 +27,7 @@ Implemented today:
 - Server support for multiple streams per QUIC connection.
 - Server-side TCP target dialing with timeout and basic target address validation.
 - Optional server-side TCP target allowlist.
-- `ConnectTCPResponse` success/failure handshake before raw TCP proxying begins.
+- `ConnectResponse` success/failure handshake before raw TCP proxying begins.
 - Bidirectional byte proxying between local TCP, QUIC streams, and server-side TCP targets.
 
 Not implemented yet:
@@ -72,13 +72,13 @@ Loads and validates client config, establishes one QUIC/mTLS connection to the c
 For each local TCP connection:
 
 1. open a new QUIC stream on the shared QUIC connection
-2. send `ConnectTCPRequest`
-3. read `ConnectTCPResponse`
+2. send `ConnectRequest{Protocol: "tcp"}`
+3. read `ConnectResponse`
 4. if OK, proxy bytes between the local TCP connection and QUIC stream
 
 ### `qoru server`
 
-Loads and validates server config, loads its TLS identity, starts a QUIC listener, accepts QUIC connections, accepts multiple streams per connection, reads `ConnectTCPRequest`, dials the requested TCP target, sends `ConnectTCPResponse`, and proxies bytes between the QUIC stream and target TCP connection.
+Loads and validates server config, loads its TLS identity, starts a QUIC listener, accepts QUIC connections, accepts multiple streams per connection, reads `ConnectRequest`, dials the requested TCP target, sends `ConnectResponse`, and proxies bytes between the QUIC stream and target TCP connection.
 
 ### `qoru print-config`
 
@@ -212,26 +212,29 @@ Current constants:
 
 ```go
 Version = 1
-TypeConnectTCP = 1
-TypeConnectTCPResponse = 2
+TypeConnectRequest = 1
+TypeConnectResponse = 2
 MaxPayloadSize = 64*1024 - 1
+MaxProtocolLength = 32
 MaxTargetLength = 4096
 ```
 
-### `ConnectTCPRequest`
+### `ConnectRequest`
 
-Sent by the client to ask the server to dial a TCP target.
+Sent by the client to ask the server to open a target for a protocol. Currently only `protocol: tcp` is supported at runtime.
 
 Payload format:
 
 ```text
-target_len uint16 big endian
-target     []byte
+protocol_len uint8
+protocol     []byte
+target_len   uint16 big endian
+target       []byte
 ```
 
-### `ConnectTCPResponse`
+### `ConnectResponse`
 
-Sent by the server after attempting to dial the requested TCP target.
+Sent by the server after attempting to open the requested target.
 
 Payload format:
 
@@ -246,8 +249,8 @@ If status is OK, both sides hand the stream over to raw TCP proxying.
 Current TCP stream model:
 
 ```text
-[ConnectTCPRequest frame]
-[ConnectTCPResponse frame]
+[ConnectRequest frame]
+[ConnectResponse frame]
 [raw TCP bytes...]
 ```
 
@@ -262,7 +265,7 @@ Timeouts are currently hardcoded.
 - client QUIC dial timeout: `10s`
 - server TCP target dial timeout: `10s`
 
-Server target dialing uses `net.Dialer.DialContext` and validates targets with `net.SplitHostPort` before dialing. DNS lookup and dial errors are reported through `ConnectTCPResponse`.
+Server target dialing uses `net.Dialer.DialContext` and validates targets with `net.SplitHostPort` before dialing. DNS lookup and dial errors are reported through `ConnectResponse`.
 
 Timeouts are not yet configurable.
 
@@ -289,8 +292,8 @@ The current client runtime lives in `internal/client`.
 3. binds one local TCP listener per configured `forwards` entry
 4. starts accept loops for all listeners
 5. for each local TCP connection, opens a new QUIC stream on the shared connection
-6. sends `ConnectTCPRequest`
-7. waits for `ConnectTCPResponse`
+6. sends `ConnectRequest{Protocol: "tcp"}`
+7. waits for `ConnectResponse`
 8. proxies bytes between the local TCP connection and QUIC stream
 9. exits cleanly when the context is canceled
 10. returns an error if the shared QUIC connection closes unexpectedly
@@ -298,7 +301,7 @@ The current client runtime lives in `internal/client`.
 Useful lower-level helpers:
 
 - `Connect` opens the shared QUIC connection.
-- `OpenTCPStream` opens a stream and performs the `ConnectTCPRequest`/`ConnectTCPResponse` handshake.
+- `OpenTCPStream` opens a stream and performs the `ConnectRequest`/`ConnectResponse` handshake.
 - `ConnectTCP` opens a fresh QUIC connection and stream; this is primarily useful in tests and small helper flows.
 
 Current limitation: no reconnect behavior yet. If the shared QUIC connection dies, the client runtime exits instead of reconnecting.
@@ -315,11 +318,11 @@ The current server runtime lives in `internal/server`.
 4. logs the bound address
 5. accepts QUIC connections
 6. accepts multiple streams per QUIC connection
-7. reads `ConnectTCPRequest` per stream
+7. reads `ConnectRequest` per stream
 8. validates target address shape
 9. checks the optional TCP target allowlist
 10. dials the requested TCP target with timeout
-11. sends `ConnectTCPResponse`
+11. sends `ConnectResponse`
 11. if OK, proxies bytes between the QUIC stream and TCP target
 12. exits cleanly when the context is canceled
 

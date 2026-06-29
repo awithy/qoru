@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -41,27 +42,37 @@ func handleConnection(ctx context.Context, cfg *config.Config, conn *quic.Conn, 
 }
 
 func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream *quic.Stream, logger *slog.Logger, opts options) {
-	req, err := protocol.ReadConnectTCPRequest(stream)
+	req, err := protocol.ReadConnectRequest(stream)
 	if err != nil {
 		if logger != nil {
-			logger.Error("read connect tcp request failed", "error", err)
+			logger.Error("read connect request failed", "error", err)
 		}
 		_ = stream.Close()
 		return
 	}
 
 	if logger != nil {
-		logger.Info("connect tcp requested", "peer_id", peerID, "target", req.Target)
+		logger.Info("connect requested", "peer_id", peerID, "protocol", req.Protocol, "target", req.Target)
 	}
-	if opts.connectTCPRequest != nil {
-		opts.connectTCPRequest(req)
+	if opts.connectRequest != nil {
+		opts.connectRequest(req)
+	}
+
+	if req.Protocol != "tcp" {
+		err := fmt.Errorf("unsupported connect protocol %q", req.Protocol)
+		if logger != nil {
+			logger.Warn("connect protocol unsupported", "peer_id", peerID, "protocol", req.Protocol, "target", req.Target, "error", err)
+		}
+		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Message: err.Error()})
+		_ = stream.Close()
+		return
 	}
 
 	if err := authorizeTCPTarget(cfg, peerID, req.Target); err != nil {
 		if logger != nil {
 			logger.Warn("tcp target denied", "peer_id", peerID, "target", req.Target, "error", err)
 		}
-		_ = protocol.WriteConnectTCPResponse(stream, protocol.ConnectTCPResponse{OK: false, Message: err.Error()})
+		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Message: err.Error()})
 		_ = stream.Close()
 		return
 	}
@@ -71,13 +82,13 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 		if logger != nil {
 			logger.Error("tcp target dial failed", "peer_id", peerID, "target", req.Target, "error", err)
 		}
-		_ = protocol.WriteConnectTCPResponse(stream, protocol.ConnectTCPResponse{OK: false, Message: err.Error()})
+		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Message: err.Error()})
 		_ = stream.Close()
 		return
 	}
 	defer targetConn.Close()
 
-	if err := protocol.WriteConnectTCPResponse(stream, protocol.ConnectTCPResponse{OK: true}); err != nil {
+	if err := protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: true}); err != nil {
 		if logger != nil {
 			logger.Error("write connect tcp response failed", "peer_id", peerID, "target", req.Target, "error", err)
 		}

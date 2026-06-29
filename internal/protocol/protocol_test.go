@@ -8,94 +8,100 @@ import (
 	"testing"
 )
 
-func TestConnectTCPRequestRoundTrip(t *testing.T) {
+func TestConnectRequestRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
-	want := ConnectTCPRequest{Target: "127.0.0.1:5432"}
+	want := ConnectRequest{Protocol: "tcp", Target: "127.0.0.1:5432"}
 
-	if err := WriteConnectTCPRequest(&buf, want); err != nil {
-		t.Fatalf("WriteConnectTCPRequest returned error: %v", err)
+	if err := WriteConnectRequest(&buf, want); err != nil {
+		t.Fatalf("WriteConnectRequest returned error: %v", err)
 	}
 
-	got, err := ReadConnectTCPRequest(&buf)
+	got, err := ReadConnectRequest(&buf)
 	if err != nil {
-		t.Fatalf("ReadConnectTCPRequest returned error: %v", err)
+		t.Fatalf("ReadConnectRequest returned error: %v", err)
 	}
 	if got != want {
 		t.Fatalf("expected %#v, got %#v", want, got)
 	}
 }
 
-func TestConnectTCPResponseRoundTripOK(t *testing.T) {
+func TestConnectResponseRoundTripOK(t *testing.T) {
 	var buf bytes.Buffer
-	want := ConnectTCPResponse{OK: true}
+	want := ConnectResponse{OK: true}
 
-	if err := WriteConnectTCPResponse(&buf, want); err != nil {
-		t.Fatalf("WriteConnectTCPResponse returned error: %v", err)
+	if err := WriteConnectResponse(&buf, want); err != nil {
+		t.Fatalf("WriteConnectResponse returned error: %v", err)
 	}
 
-	got, err := ReadConnectTCPResponse(&buf)
+	got, err := ReadConnectResponse(&buf)
 	if err != nil {
-		t.Fatalf("ReadConnectTCPResponse returned error: %v", err)
+		t.Fatalf("ReadConnectResponse returned error: %v", err)
 	}
 	if got != want {
 		t.Fatalf("expected %#v, got %#v", want, got)
 	}
 }
 
-func TestConnectTCPResponseRoundTripError(t *testing.T) {
+func TestConnectResponseRoundTripError(t *testing.T) {
 	var buf bytes.Buffer
-	want := ConnectTCPResponse{OK: false, Message: "dial failed"}
+	want := ConnectResponse{OK: false, Message: "dial failed"}
 
-	if err := WriteConnectTCPResponse(&buf, want); err != nil {
-		t.Fatalf("WriteConnectTCPResponse returned error: %v", err)
+	if err := WriteConnectResponse(&buf, want); err != nil {
+		t.Fatalf("WriteConnectResponse returned error: %v", err)
 	}
 
-	got, err := ReadConnectTCPResponse(&buf)
+	got, err := ReadConnectResponse(&buf)
 	if err != nil {
-		t.Fatalf("ReadConnectTCPResponse returned error: %v", err)
+		t.Fatalf("ReadConnectResponse returned error: %v", err)
 	}
 	if got != want {
 		t.Fatalf("expected %#v, got %#v", want, got)
 	}
 }
 
-func TestWriteConnectTCPRequestRejectsEmptyTarget(t *testing.T) {
-	if err := WriteConnectTCPRequest(io.Discard, ConnectTCPRequest{}); err == nil {
+func TestWriteConnectRequestRejectsEmptyProtocol(t *testing.T) {
+	if err := WriteConnectRequest(io.Discard, ConnectRequest{Target: "127.0.0.1:5432"}); err == nil {
+		t.Fatal("expected empty protocol to be rejected")
+	}
+}
+
+func TestWriteConnectRequestRejectsEmptyTarget(t *testing.T) {
+	if err := WriteConnectRequest(io.Discard, ConnectRequest{Protocol: "tcp"}); err == nil {
 		t.Fatal("expected empty target to be rejected")
 	}
 }
 
-func TestWriteConnectTCPRequestRejectsTooLongTarget(t *testing.T) {
+func TestWriteConnectRequestRejectsTooLongTarget(t *testing.T) {
 	target := strings.Repeat("a", MaxTargetLength+1)
-	if err := WriteConnectTCPRequest(io.Discard, ConnectTCPRequest{Target: target}); err == nil {
+	if err := WriteConnectRequest(io.Discard, ConnectRequest{Protocol: "tcp", Target: target}); err == nil {
 		t.Fatal("expected too-long target to be rejected")
 	}
 }
 
-func TestReadConnectTCPRequestRejectsUnsupportedVersion(t *testing.T) {
+func TestReadConnectRequestRejectsUnsupportedVersion(t *testing.T) {
 	var buf bytes.Buffer
-	buf.Write([]byte{Version + 1, byte(TypeConnectTCP), 0, 2, 0, 0})
+	buf.Write([]byte{Version + 1, byte(TypeConnectRequest), 0, 3, 1, 'x', 0})
 
-	_, err := ReadConnectTCPRequest(&buf)
+	_, err := ReadConnectRequest(&buf)
 	if err == nil {
 		t.Fatal("expected unsupported version error")
 	}
 }
 
-func TestReadConnectTCPRequestRejectsWrongType(t *testing.T) {
+func TestReadConnectRequestRejectsWrongType(t *testing.T) {
 	var buf bytes.Buffer
-	if err := WriteFrame(&buf, MessageType(99), []byte{0, 0}); err != nil {
+	if err := WriteFrame(&buf, MessageType(99), []byte{1, 'x', 0, 1, 'y'}); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := ReadConnectTCPRequest(&buf)
+	_, err := ReadConnectRequest(&buf)
 	if err == nil {
 		t.Fatal("expected wrong type error")
 	}
 }
 
 func TestWriteFrameRejectsOversizedPayload(t *testing.T) {
-	err := WriteFrame(io.Discard, TypeConnectTCP, make([]byte, MaxPayloadSize+1))
+	err := WriteFrame(io.Discard, TypeConnectRequest, make([]byte, MaxPayloadSize+1))
 	if err == nil {
 		t.Fatal("expected oversized payload error")
 	}
@@ -109,31 +115,31 @@ func TestReadFrameRejectsTruncatedHeader(t *testing.T) {
 }
 
 func TestReadFrameRejectsTruncatedPayload(t *testing.T) {
-	_, err := ReadFrame(bytes.NewReader([]byte{Version, byte(TypeConnectTCP), 0, 4, 1}))
+	_, err := ReadFrame(bytes.NewReader([]byte{Version, byte(TypeConnectRequest), 0, 4, 1}))
 	if !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("expected unexpected EOF, got %v", err)
 	}
 }
 
-func TestReadConnectTCPRequestRejectsMalformedPayload(t *testing.T) {
+func TestReadConnectRequestRejectsMalformedPayload(t *testing.T) {
 	var buf bytes.Buffer
-	if err := WriteFrame(&buf, TypeConnectTCP, []byte{0, 4, 'a'}); err != nil {
+	if err := WriteFrame(&buf, TypeConnectRequest, []byte{3, 't', 'c', 'p', 0, 4, 'a'}); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := ReadConnectTCPRequest(&buf)
+	_, err := ReadConnectRequest(&buf)
 	if err == nil {
 		t.Fatal("expected malformed payload error")
 	}
 }
 
-func TestReadConnectTCPResponseRejectsMalformedPayload(t *testing.T) {
+func TestReadConnectResponseRejectsMalformedPayload(t *testing.T) {
 	var buf bytes.Buffer
-	if err := WriteFrame(&buf, TypeConnectTCPResponse, []byte{ConnectStatusError, 0, 4, 'n'}); err != nil {
+	if err := WriteFrame(&buf, TypeConnectResponse, []byte{ConnectStatusError, 0, 4, 'n'}); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := ReadConnectTCPResponse(&buf)
+	_, err := ReadConnectResponse(&buf)
 	if err == nil {
 		t.Fatal("expected malformed payload error")
 	}
