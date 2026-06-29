@@ -38,6 +38,12 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 		apply(&opts)
 	}
 
+	conn, err := Connect(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer conn.CloseWithError(0, "done")
+
 	listeners := make([]forwardListener, 0, len(cfg.TCPForwards))
 	for _, forward := range cfg.TCPForwards {
 		listener, err := net.Listen("tcp", forward.Listen)
@@ -49,6 +55,16 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 	}
 	defer closeListeners(listeners)
 
+	go func() {
+		<-ctx.Done()
+		closeListeners(listeners)
+	}()
+
+	errCh := make(chan error, len(listeners))
+	for _, item := range listeners {
+		go acceptForward(ctx, conn, item.forward, item.listener, logger, errCh)
+	}
+
 	for _, item := range listeners {
 		addr := item.listener.Addr().String()
 		if logger != nil {
@@ -57,16 +73,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 		if opts.started != nil {
 			opts.started(addr)
 		}
-	}
-
-	go func() {
-		<-ctx.Done()
-		closeListeners(listeners)
-	}()
-
-	errCh := make(chan error, len(listeners))
-	for _, item := range listeners {
-		go acceptForward(ctx, cfg, item.forward, item.listener, logger, errCh)
 	}
 
 	select {
@@ -86,7 +92,7 @@ func closeListeners(listeners []forwardListener) {
 	}
 }
 
-func acceptForward(ctx context.Context, cfg *config.Config, forward config.TCPForwardConfig, listener net.Listener, logger *slog.Logger, errCh chan<- error) {
+func acceptForward(ctx context.Context, conn *quic.Conn, forward config.TCPForwardConfig, listener net.Listener, logger *slog.Logger, errCh chan<- error) {
 	for {
 		localConn, err := listener.Accept()
 		if err != nil {
@@ -96,21 +102,20 @@ func acceptForward(ctx context.Context, cfg *config.Config, forward config.TCPFo
 			errCh <- err
 			return
 		}
-		go handleLocalConnection(ctx, cfg, forward.Target, localConn, logger)
+		go handleLocalConnection(ctx, conn, forward.Target, localConn, logger)
 	}
 }
 
-func handleLocalConnection(ctx context.Context, cfg *config.Config, target string, localConn net.Conn, logger *slog.Logger) {
+func handleLocalConnection(ctx context.Context, conn *quic.Conn, target string, localConn net.Conn, logger *slog.Logger) {
 	defer localConn.Close()
 
-	conn, stream, err := ConnectTCP(ctx, cfg, target, logger)
+	stream, err := OpenTCPStream(ctx, conn, target)
 	if err != nil {
 		if logger != nil {
-			logger.Error("connect tcp failed", "target", target, "error", err)
+			logger.Error("open tcp stream failed", "target", target, "error", err)
 		}
 		return
 	}
-	defer conn.CloseWithError(0, "done")
 
 	proxyTCP(localConn, stream)
 }
