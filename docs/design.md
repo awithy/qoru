@@ -531,6 +531,10 @@ client-1.crt
 client-1.key
 server-1.crt
 server-1.key
+relay-a.crt
+relay-a.key
+relay-b.crt
+relay-b.key
 ```
 
 `dev/certs/` is ignored by git.
@@ -545,6 +549,19 @@ go run ./dev/echo-server -listen 127.0.0.1:9000
 go run ./cmd/qoru server -c examples/config/server.yaml
 go run ./cmd/qoru client -c examples/config/client.yaml
 nc 127.0.0.1 15432
+```
+
+Automated smoke tests are available:
+
+```sh
+make demo-e2e
+make demo-multihop
+```
+
+`demo-multihop` exercises:
+
+```text
+local TCP client -> qoru client -> relay-a -> relay-b -> echo target
 ```
 
 See `docs/local-demo.md` for details.
@@ -572,6 +589,6 @@ docs/                  design documentation
 3. Improve reconnect observability and clearer server-side session handling.
 4. Consider configurable log level/log format and timeout settings.
 5. Add server-side peer/session management with startup dialing, inbound session registration, connection reuse, and deterministic duplicate-session handling.
-6. Add an automated explicit-route multi-hop smoke test and demo config.
+6. Improve explicit-route multi-hop smoke tests and demo docs.
 7. Add richer service selection semantics for future multi-egress/load-balanced service routing.
 8. Later: end-to-end encrypted payload frames.

@@ -1,0 +1,13 @@
+node_id: relay-a
+mode: server
+
+identity:
+  cert: ./dev/certs/relay-a.crt
+  key: ./dev/certs/relay-a.key
+  ca: ./dev/certs/ca.crt
+
+listen: 127.0.0.1:4433
+
+servers:
+  - id: relay-b
+    address: 127.0.0.1:4434

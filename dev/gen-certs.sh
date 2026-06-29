@@ -71,6 +71,8 @@ EOF
 
 gen_node_cert "client-1" "URI:spiffe://qoru/node/client-1"
 gen_node_cert "server-1" "URI:spiffe://qoru/node/server-1"
+gen_node_cert "relay-a" "URI:spiffe://qoru/node/relay-a"
+gen_node_cert "relay-b" "URI:spiffe://qoru/node/relay-b"
 
 rm -f "$OUT_DIR"/*.cnf "$OUT_DIR"/*.srl
 

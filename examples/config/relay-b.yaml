@@ -1,0 +1,16 @@
+node_id: relay-b
+mode: server
+
+identity:
+  cert: ./dev/certs/relay-b.crt
+  key: ./dev/certs/relay-b.key
+  ca: ./dev/certs/ca.crt
+
+listen: 127.0.0.1:4434
+
+services:
+  - name: echo
+    protocol: tcp
+    target: 127.0.0.1:9000
+    peers:
+      - relay-a

@@ -1,4 +1,4 @@
-.PHONY: build test demo-e2e gen-dev-certs
+.PHONY: build test demo-e2e demo-multihop gen-dev-certs
 
 build:
 	@mkdir -p build
@@ -9,6 +9,9 @@ test:
 
 demo-e2e:
 	./dev/e2e-demo.sh
+
+demo-multihop:
+	./dev/e2e-multihop.sh
 
 gen-dev-certs:
 	./dev/gen-certs.sh

@@ -33,10 +33,11 @@ TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
 
 ## Quick Start: Local Demo
 
-Run the automated local smoke test:
+Run the automated local smoke tests:
 
 ```sh
 make demo-e2e
+make demo-multihop
 ```
 
 Or run the demo manually.
@@ -213,7 +214,7 @@ Near-term:
 - Improve service dial failure behavior for local TCP clients.
 - Add better reconnect observability and clearer server-side session handling.
 - Add server-side peer/session management with startup dialing, inbound session registration, connection reuse, and deterministic duplicate-session handling.
-- Add automated explicit-route multi-hop smoke testing and demo config.
+- Improve automated explicit-route multi-hop smoke testing and demo config.
 - Add richer service selection semantics for future multi-egress/load-balanced service routing.
 
 Longer-term:
@@ -230,6 +231,14 @@ Longer-term:
 docs/design.md
 docs/local-demo.md
 docs/design-discussion1.md
+```
+
+Example multi-hop configs:
+
+```text
+examples/config/client-multihop.yaml
+examples/config/relay-a.yaml
+examples/config/relay-b.yaml
 ```
 
 ## Status
