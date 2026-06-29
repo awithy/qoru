@@ -69,14 +69,15 @@ If `--config` is omitted, qoru resolves config using the first existing path fro
 
 ### `qoru client`
 
-Loads and validates client config, establishes one QUIC/mTLS connection to the configured qoru server, starts all configured local TCP listeners, and opens one QUIC stream per accepted local TCP connection. If the upstream QUIC connection later fails, the client keeps its local listeners open and reconnects on demand for future local TCP connections.
+Loads and validates client config, establishes one QUIC/mTLS connection to each configured upstream qoru server, starts all configured local TCP listeners, and opens one QUIC stream per accepted local TCP connection. If an upstream QUIC connection later fails, the client keeps its local listeners open and reconnects that upstream on demand for future local TCP connections.
 
 For each local TCP connection:
 
-1. open a new QUIC stream on the shared QUIC connection
-2. send `ConnectRequest{Protocol: "tcp", Service: "...", Egress: "..."}`
-3. read `ConnectResponse`
-4. if OK, proxy bytes between the local TCP connection and QUIC stream
+1. select an upstream by the forward's `egress` value, or the sole configured upstream when `egress` is empty
+2. open a new QUIC stream on the selected upstream connection
+3. send `ConnectRequest{Protocol: "tcp", Service: "...", Egress: "..."}`
+4. read `ConnectResponse`
+5. if OK, proxy bytes between the local TCP connection and QUIC stream
 
 ### `qoru server`
 
@@ -196,7 +197,7 @@ Current behavior:
 - private CA loaded from configured `identity.ca`
 - system trust store is not used
 - server requires and verifies client certificates
-- client verifies the server certificate chain and qoru node URI SAN against the configured server identity
+- client verifies the server certificate chain and qoru node URI SAN against the selected upstream server identity
 - ALPN is set to `qoru/1`
 
 The current identity model requires SPIFFE-style URI SAN identities:
@@ -324,11 +325,12 @@ The current client runtime lives in `internal/client`.
 10. keeps local listeners running if the upstream QUIC connection later fails
 11. reconnects the selected upstream on demand when a later local TCP connection needs a new stream
 
-Useful lower-level helpers:
+Relevant client package files:
 
-- `Connect` opens the shared QUIC connection.
-- `OpenTCPStream` opens a stream and performs the `ConnectRequest`/`ConnectResponse` handshake.
-- `ConnectTCP` opens a fresh QUIC connection and stream; this is primarily useful in tests and small helper flows.
+- `client.go` contains runtime orchestration, local TCP listeners, and local connection handling.
+- `session.go` contains upstream session selection and reconnect management.
+- `stream.go` contains QUIC dialing and the `ConnectRequest`/`ConnectResponse` stream setup handshake.
+- `proxy.go` contains byte proxying between local TCP connections and QUIC streams.
 
 Current limitation: reconnect is on demand and applies only to future local TCP connections. Active proxied TCP connections are bound to streams on the old QUIC connection; if that connection dies, those TCP connections are closed rather than resumed.
 ## Server Runtime
@@ -412,7 +414,7 @@ See `docs/local-demo.md` for details.
 ```text
 cmd/qoru/              CLI entrypoint
 internal/cli/          Cobra commands and command wiring
-internal/client/       QUIC client runtime and local TCP proxying
+internal/client/       QUIC client runtime, upstream sessions, stream setup, and local TCP proxying
 internal/config/       config structs, path resolution, YAML load/marshal, validation
 internal/identity/     TLS and mTLS identity loading
 internal/protocol/     custom binary frame protocol
