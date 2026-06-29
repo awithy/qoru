@@ -13,26 +13,61 @@ import (
 	"github.com/awithy/qoru/internal/server"
 )
 
-func TestRunConnectsToServerWithMTLS(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func TestRunListensAndProxiesLocalTCP(t *testing.T) {
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	addr, serverErr := startTestServer(t, ctx, logger, nil)
-	targetListener, targetAccepted := startAcceptOnlyTCPServer(t)
+	addr, serverErr := startTestServer(t, serverCtx, logger, nil)
+	targetListener := startEchoTCPServer(t)
 
+	clientCtx, clientCancel := context.WithCancel(context.Background())
+	defer clientCancel()
 	clientCfg := testClientConfig(addr, targetListener.Addr().String())
-	if err := Run(ctx, clientCfg, logger); err != nil {
-		t.Fatalf("expected client to connect: %v", err)
-	}
+	clientCfg.TCPForwards[0].Listen = "127.0.0.1:0"
 
+	clientStarted := make(chan string, 1)
+	clientErr := make(chan error, 1)
+	go func() {
+		clientErr <- Run(clientCtx, clientCfg, logger, WithStartedFunc(func(addr string) { clientStarted <- addr }))
+	}()
+
+	var clientAddr string
 	select {
-	case <-targetAccepted:
+	case clientAddr = <-clientStarted:
+	case err := <-clientErr:
+		t.Fatalf("client exited before starting: %v", err)
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for server to dial target")
+		t.Fatal("timed out waiting for client to start")
 	}
 
-	cancelAndWaitForServer(t, cancel, serverErr)
+	localConn, err := net.Dial("tcp", clientAddr)
+	if err != nil {
+		t.Fatalf("dial client listener: %v", err)
+	}
+	defer localConn.Close()
+
+	if _, err := localConn.Write([]byte("ping")); err != nil {
+		t.Fatalf("write to local connection: %v", err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(localConn, buf); err != nil {
+		t.Fatalf("read from local connection: %v", err)
+	}
+	if string(buf) != "ping" {
+		t.Fatalf("expected echo %q, got %q", "ping", string(buf))
+	}
+
+	clientCancel()
+	select {
+	case err := <-clientErr:
+		if err != nil {
+			t.Fatalf("expected clean client shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for client shutdown")
+	}
+	cancelAndWaitForServer(t, serverCancel, serverErr)
 }
 
 func TestConnectTCPProxiesBytesToTarget(t *testing.T) {
@@ -104,26 +139,6 @@ func startTestServer(t *testing.T, ctx context.Context, logger *slog.Logger, onC
 		t.Fatal("timed out waiting for server to start")
 	}
 	panic("unreachable")
-}
-
-func startAcceptOnlyTCPServer(t *testing.T) (net.Listener, <-chan struct{}) {
-	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
-
-	accepted := make(chan struct{}, 1)
-	go func() {
-		conn, err := listener.Accept()
-		if err != nil {
-			return
-		}
-		_ = conn.Close()
-		accepted <- struct{}{}
-	}()
-	return listener, accepted
 }
 
 func startEchoTCPServer(t *testing.T) net.Listener {

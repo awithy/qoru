@@ -27,9 +27,13 @@ type commandRunners struct {
 
 func NewRootCommand() *cobra.Command {
 	return newRootCommand(commandRunners{
-		client: client.Run,
+		client: runClient,
 		server: runServer,
 	})
+}
+
+func runClient(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
+	return client.Run(ctx, cfg, logger)
 }
 
 func runServer(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
