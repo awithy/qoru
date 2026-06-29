@@ -183,7 +183,15 @@ egress_services:
 
 ## Documentation
 
-Design notes from the initial discussion are available in:
+Current design and local demo docs are available in:
+
+```text
+docs/design.md
+docs/local-demo.md
+docs/handoff.md
+```
+
+Initial discussion notes are available in:
 
 ```text
 docs/design-discussion1.md

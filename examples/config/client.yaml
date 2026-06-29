@@ -12,4 +12,4 @@ server:
 
 tcp_forwards:
   - listen: 127.0.0.1:15432
-    target: 127.0.0.1:5432
+    target: 127.0.0.1:9000
