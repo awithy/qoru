@@ -121,6 +121,51 @@ func TestRunListensOnMultipleForwards(t *testing.T) {
 	cancelAndWaitForServer(t, serverCancel, serverErr)
 }
 
+func TestRunReconnectsForNewLocalTCPConnections(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	targetListener := startEchoTCPServerLoop(t)
+
+	serverCfg := testServerConfig()
+	serverCfg.Services = []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: targetListener.Addr().String(), Peers: []string{"client-1"}}}
+
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	addr, serverErr := startTestServerWithConfig(t, serverCtx, logger, serverCfg, nil)
+
+	clientCtx, clientCancel := context.WithCancel(context.Background())
+	defer clientCancel()
+	clientCfg := testClientConfig(addr, targetListener.Addr().String())
+	clientCfg.Forwards[0].Listen = "127.0.0.1:0"
+
+	clientStarted := make(chan string, 1)
+	clientErr := make(chan error, 1)
+	go func() {
+		clientErr <- Run(clientCtx, clientCfg, logger, WithStartedFunc(func(addr string) { clientStarted <- addr }))
+	}()
+
+	clientAddr := waitForClientAddr(t, clientStarted, clientErr)
+	assertEcho(t, clientAddr, "one!")
+
+	cancelAndWaitForServer(t, serverCancel, serverErr)
+
+	serverCtx2, serverCancel2 := context.WithCancel(context.Background())
+	defer serverCancel2()
+	addr2, serverErr2 := startTestServerWithConfig(t, serverCtx2, logger, serverCfg, nil)
+	clientCfg.Server.Address = addr2
+
+	assertEcho(t, clientAddr, "two!")
+
+	clientCancel()
+	select {
+	case err := <-clientErr:
+		if err != nil {
+			t.Fatalf("expected clean client shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for client shutdown")
+	}
+	cancelAndWaitForServer(t, serverCancel2, serverErr2)
+}
+
 func TestMultipleStreamsOnOneQUICConnection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -311,11 +356,6 @@ func assertEcho(t *testing.T, addr, msg string) {
 	}
 }
 
-func startTestServer(t *testing.T, ctx context.Context, logger *slog.Logger, onConnect func(protocol.ConnectRequest)) (string, <-chan error) {
-	t.Helper()
-	return startTestServerWithConfig(t, ctx, logger, testServerConfig(), onConnect)
-}
-
 func testServerConfig() *config.Config {
 	return &config.Config{
 		NodeID:   "server-1",
@@ -347,6 +387,29 @@ func startTestServerWithConfig(t *testing.T, ctx context.Context, logger *slog.L
 		t.Fatal("timed out waiting for server to start")
 	}
 	panic("unreachable")
+}
+
+func startEchoTCPServerLoop(t *testing.T) net.Listener {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				_, _ = io.Copy(conn, conn)
+			}()
+		}
+	}()
+	return listener
 }
 
 func startEchoTCPServer(t *testing.T) net.Listener {

@@ -58,8 +58,8 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 		apply(&opts)
 	}
 
-	conn, err := Connect(ctx, cfg, logger)
-	if err != nil {
+	session := newReconnectingUpstreamSession(cfg, logger)
+	if _, err := session.connection(ctx); err != nil {
 		return err
 	}
 
@@ -80,13 +80,13 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 		acceptWG.Add(1)
 		go func(item forwardListener) {
 			defer acceptWG.Done()
-			acceptForward(ctx, conn, item.forward, item.listener, logger, errCh, &handlerWG)
+			acceptForward(ctx, session, item.forward, item.listener, logger, errCh, &handlerWG)
 		}(item)
 	}
 
 	shutdown := func(reason string) error {
 		closeListeners(listeners)
-		_ = conn.CloseWithError(0, reason)
+		session.Close(reason)
 		if err := waitGroupTimeout(&acceptWG, defaultShutdownWaitTimeout); err != nil {
 			return fmt.Errorf("client accept shutdown: %w", err)
 		}
@@ -109,21 +109,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 	select {
 	case <-ctx.Done():
 		return shutdown("context canceled")
-	case <-conn.Context().Done():
-		if ctx.Err() != nil {
-			return shutdown("context canceled")
-		}
-		shutdownErr := shutdown("quic connection closed")
-		if err := conn.Context().Err(); err != nil {
-			if shutdownErr != nil {
-				return fmt.Errorf("quic connection closed: %w; %v", err, shutdownErr)
-			}
-			return fmt.Errorf("quic connection closed: %w", err)
-		}
-		if shutdownErr != nil {
-			return shutdownErr
-		}
-		return fmt.Errorf("quic connection closed")
 	case err := <-errCh:
 		if ctx.Err() != nil {
 			return shutdown("context canceled")
@@ -141,7 +126,7 @@ func closeListeners(listeners []forwardListener) {
 	}
 }
 
-func acceptForward(ctx context.Context, conn *quic.Conn, forward config.ForwardConfig, listener net.Listener, logger *slog.Logger, errCh chan<- error, handlerWG *sync.WaitGroup) {
+func acceptForward(ctx context.Context, session upstreamSession, forward config.ForwardConfig, listener net.Listener, logger *slog.Logger, errCh chan<- error, handlerWG *sync.WaitGroup) {
 	for {
 		localConn, err := listener.Accept()
 		if err != nil {
@@ -154,7 +139,7 @@ func acceptForward(ctx context.Context, conn *quic.Conn, forward config.ForwardC
 		handlerWG.Add(1)
 		go func() {
 			defer handlerWG.Done()
-			handleLocalConnection(ctx, conn, forward.Service, forward.Egress, localConn, logger)
+			handleLocalConnection(ctx, session, forward.Service, forward.Egress, localConn, logger)
 		}()
 	}
 }
@@ -174,10 +159,10 @@ func waitGroupTimeout(wg *sync.WaitGroup, timeout time.Duration) error {
 	}
 }
 
-func handleLocalConnection(ctx context.Context, conn *quic.Conn, service, egress string, localConn net.Conn, logger *slog.Logger) {
+func handleLocalConnection(ctx context.Context, session upstreamSession, service, egress string, localConn net.Conn, logger *slog.Logger) {
 	defer localConn.Close()
 
-	stream, err := OpenTCPStream(ctx, conn, service, egress)
+	stream, err := session.OpenTCPStream(ctx, service, egress)
 	if err != nil {
 		if logger != nil {
 			var rejected *ConnectRejectedError
