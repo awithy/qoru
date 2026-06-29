@@ -452,6 +452,25 @@ Relevant client package files:
 
 Current limitation: reconnect is on demand and applies only to future local TCP connections. Active proxied TCP connections are bound to streams on the old QUIC connection; if that connection dies, those TCP connections are closed rather than resumed. Failed reconnect dials use exponential backoff capped at `16s`; successful reconnect resets the backoff state.
 
+## Peer Session Direction Model
+
+The long-term relay model treats node-to-node QUIC connections as logical peer sessions, independent of which side initiated the underlying connection.
+
+A relay/server should eventually:
+
+1. start its QUIC listener
+2. initiate outbound QUIC connections to configured peers at startup
+3. accept inbound QUIC connections from peers
+4. authenticate all peers with mTLS node identity
+5. register each connection as a session keyed by remote node ID
+6. use the session manager for forwarding to a next hop
+
+In this model, route forwarding asks for an authenticated peer session by node ID rather than dialing the next hop ad hoc for every proxied TCP connection.
+
+If two peers connect to each other at the same time, duplicate sessions must be resolved deterministically. A likely rule is to keep the connection initiated by the lexicographically lower node ID and close the duplicate. The exact duplicate-session policy is still to be implemented.
+
+Current implementation note: explicit-route relay forwarding works, but an intermediary relay currently dials the next hop on demand for each relayed TCP stream. Direction-independent startup peer sessions and connection reuse are not implemented yet.
+
 ## Server Runtime
 
 The current server runtime lives in `internal/server`.
@@ -474,6 +493,8 @@ The current server runtime lives in `internal/server`.
 14. exits cleanly when the context is canceled
 
 For routed requests, the receiving server validates that the first remaining route hop is its own `node_id`. If additional hops remain, it dials the next configured server, forwards the request with its own hop removed from `route`, relays the downstream `ConnectResponse` back upstream, and then proxies raw bytes between QUIC streams.
+
+Current limitation: relay-to-next-hop QUIC connections are created on demand per relayed TCP stream. The intended next evolution is a server-side peer/session manager that establishes configured peer connections at startup, also accepts inbound peer sessions, reuses sessions for forwarding, and treats peer relationships symmetrically regardless of dial direction.
 
 ## CLI Runtime Wiring
 
@@ -550,6 +571,7 @@ docs/                  design documentation
 2. Add clearer local TCP behavior when service setup/dialing fails.
 3. Improve reconnect observability and clearer server-side session handling.
 4. Consider configurable log level/log format and timeout settings.
-5. Add an automated explicit-route multi-hop smoke test and demo config.
-6. Add richer service selection semantics for future multi-egress/load-balanced service routing.
-7. Later: end-to-end encrypted payload frames.
+5. Add server-side peer/session management with startup dialing, inbound session registration, connection reuse, and deterministic duplicate-session handling.
+6. Add an automated explicit-route multi-hop smoke test and demo config.
+7. Add richer service selection semantics for future multi-egress/load-balanced service routing.
+8. Later: end-to-end encrypted payload frames.

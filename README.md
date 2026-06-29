@@ -212,11 +212,13 @@ Near-term:
 - Improve active connection shutdown behavior.
 - Improve service dial failure behavior for local TCP clients.
 - Add better reconnect observability and clearer server-side session handling.
+- Add server-side peer/session management with startup dialing, inbound session registration, connection reuse, and deterministic duplicate-session handling.
 - Add automated explicit-route multi-hop smoke testing and demo config.
 - Add richer service selection semantics for future multi-egress/load-balanced service routing.
 
 Longer-term:
 
+- Direction-independent peer sessions across the full overlay.
 - End-to-end encrypted payload frames.
 - UDP support.
 - Topology/status commands.
