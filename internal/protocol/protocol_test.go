@@ -44,7 +44,7 @@ func TestConnectResponseRoundTripOK(t *testing.T) {
 
 func TestConnectResponseRoundTripError(t *testing.T) {
 	var buf bytes.Buffer
-	want := ConnectResponse{OK: false, Message: "dial failed"}
+	want := ConnectResponse{OK: false, Code: ConnectCodeTargetDialFailed, Message: "dial failed"}
 
 	if err := WriteConnectResponse(&buf, want); err != nil {
 		t.Fatalf("WriteConnectResponse returned error: %v", err)
@@ -135,12 +135,24 @@ func TestReadConnectRequestRejectsMalformedPayload(t *testing.T) {
 
 func TestReadConnectResponseRejectsMalformedPayload(t *testing.T) {
 	var buf bytes.Buffer
-	if err := WriteFrame(&buf, TypeConnectResponse, []byte{ConnectStatusError, 0, 4, 'n'}); err != nil {
+	if err := WriteFrame(&buf, TypeConnectResponse, []byte{ConnectStatusError, byte(ConnectCodeInternalError), 0, 4, 'n'}); err != nil {
 		t.Fatal(err)
 	}
 
 	_, err := ReadConnectResponse(&buf)
 	if err == nil {
 		t.Fatal("expected malformed payload error")
+	}
+}
+
+func TestReadConnectResponseRejectsInvalidCode(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteFrame(&buf, TypeConnectResponse, []byte{ConnectStatusError, 99, 0, 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ReadConnectResponse(&buf)
+	if err == nil {
+		t.Fatal("expected invalid code error")
 	}
 }

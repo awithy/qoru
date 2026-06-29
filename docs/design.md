@@ -330,11 +330,26 @@ Payload format:
 
 ```text
 status      uint8   // 0 = OK, 1 = error
+code        uint8   // machine-readable response code
 message_len uint16 big endian
 message     []byte
 ```
 
-If status is OK, both sides hand the stream over to raw TCP proxying.
+Current response codes:
+
+```text
+0 OK
+1 SERVICE_NOT_FOUND
+2 ACCESS_DENIED
+3 TARGET_DIAL_FAILED
+4 UNSUPPORTED_PROTOCOL
+5 UNREACHABLE_EGRESS
+6 ROUTE_INVALID
+7 NEXT_HOP_UNREACHABLE
+8 INTERNAL_ERROR
+```
+
+If status is OK, code must be `OK` and both sides hand the stream over to raw TCP proxying. If status is error, code identifies the failure class and message provides human-readable detail.
 
 Current TCP stream model:
 
@@ -508,5 +523,6 @@ docs/                  design documentation
 2. Add clearer local TCP behavior when service setup/dialing fails.
 3. Improve reconnect observability and clearer server-side session handling.
 4. Consider configurable log level/log format and timeout settings.
-5. Add richer service selection semantics for future multi-egress/load-balanced service routing.
-6. Later: multi-hop forwarding and end-to-end encrypted payload frames.
+5. Add route config and validation for the first explicit-route multi-hop implementation.
+6. Add richer service selection semantics for future multi-egress/load-balanced service routing.
+7. Later: end-to-end encrypted payload frames.

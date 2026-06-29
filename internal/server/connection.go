@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -72,7 +73,7 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 		if logger != nil {
 			logger.Warn("connect protocol unsupported", "peer_id", peerID, "protocol", req.Protocol, "service", req.Service, "error", err)
 		}
-		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Message: err.Error()})
+		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeUnsupportedProtocol, Message: err.Error()})
 		_ = stream.Close()
 		return
 	}
@@ -82,7 +83,7 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 		if logger != nil {
 			logger.Warn("egress unsupported", "peer_id", peerID, "egress", req.Egress, "error", err)
 		}
-		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Message: err.Error()})
+		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeUnreachableEgress, Message: err.Error()})
 		_ = stream.Close()
 		return
 	}
@@ -92,7 +93,7 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 		if logger != nil {
 			logger.Warn("service denied", "peer_id", peerID, "protocol", req.Protocol, "service", req.Service, "error", err)
 		}
-		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Message: err.Error()})
+		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: serviceErrorCode(err), Message: err.Error()})
 		_ = stream.Close()
 		return
 	}
@@ -102,7 +103,7 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 		if logger != nil {
 			logger.Error("tcp target dial failed", "peer_id", peerID, "service", svc.Name, "target", svc.Target, "error", err)
 		}
-		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Message: err.Error()})
+		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeTargetDialFailed, Message: err.Error()})
 		_ = stream.Close()
 		return
 	}
@@ -124,5 +125,16 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 
 	if logger != nil {
 		logger.Info("tcp proxy closed", "peer_id", peerID, "service", svc.Name, "target", svc.Target)
+	}
+}
+
+func serviceErrorCode(err error) protocol.ConnectCode {
+	switch {
+	case errors.Is(err, ErrServiceNotFound):
+		return protocol.ConnectCodeServiceNotFound
+	case errors.Is(err, ErrAccessDenied):
+		return protocol.ConnectCodeAccessDenied
+	default:
+		return protocol.ConnectCodeInternalError
 	}
 }

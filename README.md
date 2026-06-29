@@ -16,7 +16,7 @@ TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
 - YAML configuration.
 - QUIC transport using `quic-go`.
 - mTLS peer authentication with a configured private CA.
-- Custom binary control protocol.
+- Custom binary control protocol with machine-readable connect response codes.
 - One reconnecting upstream QUIC connection per configured client-side server.
 - Multiple direct upstream servers selected by forward `egress`.
 - On-demand upstream reconnect for new local TCP connections after a QUIC connection loss.
@@ -196,6 +196,7 @@ Near-term:
 - Improve active connection shutdown behavior.
 - Improve service dial failure behavior for local TCP clients.
 - Add better reconnect observability and clearer server-side session handling.
+- Add explicit route config/validation for a first multi-hop version.
 - Add richer service selection semantics for future multi-egress/load-balanced service routing.
 
 Longer-term:

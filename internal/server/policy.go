@@ -1,9 +1,15 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/awithy/qoru/internal/config"
+)
+
+var (
+	ErrServiceNotFound = errors.New("service not found")
+	ErrAccessDenied    = errors.New("access denied")
 )
 
 func resolveService(cfg *config.Config, peerID, protocol, service string) (config.ServiceConfig, error) {
@@ -19,7 +25,7 @@ func resolveService(cfg *config.Config, peerID, protocol, service string) (confi
 				return svc, nil
 			}
 		}
-		return config.ServiceConfig{}, fmt.Errorf("peer %q is not allowed to access %s service %q", peerID, protocol, service)
+		return config.ServiceConfig{}, fmt.Errorf("%w: peer %q is not allowed to access %s service %q", ErrAccessDenied, peerID, protocol, service)
 	}
-	return config.ServiceConfig{}, fmt.Errorf("%s service %q not found", protocol, service)
+	return config.ServiceConfig{}, fmt.Errorf("%w: %s service %q", ErrServiceNotFound, protocol, service)
 }

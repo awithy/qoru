@@ -25,6 +25,49 @@ const (
 	ConnectStatusError uint8 = 1
 )
 
+type ConnectCode uint8
+
+const (
+	ConnectCodeOK ConnectCode = iota
+	ConnectCodeServiceNotFound
+	ConnectCodeAccessDenied
+	ConnectCodeTargetDialFailed
+	ConnectCodeUnsupportedProtocol
+	ConnectCodeUnreachableEgress
+	ConnectCodeRouteInvalid
+	ConnectCodeNextHopUnreachable
+	ConnectCodeInternalError
+)
+
+func (c ConnectCode) Valid() bool {
+	return c <= ConnectCodeInternalError
+}
+
+func (c ConnectCode) String() string {
+	switch c {
+	case ConnectCodeOK:
+		return "OK"
+	case ConnectCodeServiceNotFound:
+		return "SERVICE_NOT_FOUND"
+	case ConnectCodeAccessDenied:
+		return "ACCESS_DENIED"
+	case ConnectCodeTargetDialFailed:
+		return "TARGET_DIAL_FAILED"
+	case ConnectCodeUnsupportedProtocol:
+		return "UNSUPPORTED_PROTOCOL"
+	case ConnectCodeUnreachableEgress:
+		return "UNREACHABLE_EGRESS"
+	case ConnectCodeRouteInvalid:
+		return "ROUTE_INVALID"
+	case ConnectCodeNextHopUnreachable:
+		return "NEXT_HOP_UNREACHABLE"
+	case ConnectCodeInternalError:
+		return "INTERNAL_ERROR"
+	default:
+		return fmt.Sprintf("UNKNOWN_%d", c)
+	}
+}
+
 type Frame struct {
 	Version uint8
 	Type    MessageType
@@ -39,6 +82,7 @@ type ConnectRequest struct {
 
 type ConnectResponse struct {
 	OK      bool
+	Code    ConnectCode
 	Message string
 }
 
@@ -163,17 +207,24 @@ func ReadConnectRequest(r io.Reader) (ConnectRequest, error) {
 
 func WriteConnectResponse(w io.Writer, resp ConnectResponse) error {
 	status := ConnectStatusOK
+	code := resp.Code
 	if !resp.OK {
 		status = ConnectStatusError
+		if code == ConnectCodeOK {
+			code = ConnectCodeInternalError
+		}
+	} else {
+		code = ConnectCodeOK
 	}
-	if len(resp.Message) > MaxPayloadSize-3 {
-		return fmt.Errorf("message too long: %d > %d", len(resp.Message), MaxPayloadSize-3)
+	if len(resp.Message) > MaxPayloadSize-4 {
+		return fmt.Errorf("message too long: %d > %d", len(resp.Message), MaxPayloadSize-4)
 	}
 
-	payload := make([]byte, 3+len(resp.Message))
+	payload := make([]byte, 4+len(resp.Message))
 	payload[0] = status
-	binary.BigEndian.PutUint16(payload[1:3], uint16(len(resp.Message)))
-	copy(payload[3:], resp.Message)
+	payload[1] = byte(code)
+	binary.BigEndian.PutUint16(payload[2:4], uint16(len(resp.Message)))
+	copy(payload[4:], resp.Message)
 	return WriteFrame(w, TypeConnectResponse, payload)
 }
 
@@ -185,21 +236,32 @@ func ReadConnectResponse(r io.Reader) (ConnectResponse, error) {
 	if frame.Type != TypeConnectResponse {
 		return ConnectResponse{}, fmt.Errorf("unexpected message type %d", frame.Type)
 	}
-	if len(frame.Payload) < 3 {
+	if len(frame.Payload) < 4 {
 		return ConnectResponse{}, fmt.Errorf("malformed connect response payload")
 	}
 
 	status := frame.Payload[0]
-	messageLen := int(binary.BigEndian.Uint16(frame.Payload[1:3]))
-	if len(frame.Payload[3:]) != messageLen {
+	code := ConnectCode(frame.Payload[1])
+	if !code.Valid() {
+		return ConnectResponse{}, fmt.Errorf("unknown connect response code %d", code)
+	}
+	messageLen := int(binary.BigEndian.Uint16(frame.Payload[2:4]))
+	if len(frame.Payload[4:]) != messageLen {
 		return ConnectResponse{}, fmt.Errorf("malformed connect response payload: message length mismatch")
 	}
+	message := string(frame.Payload[4:])
 
 	switch status {
 	case ConnectStatusOK:
-		return ConnectResponse{OK: true, Message: string(frame.Payload[3:])}, nil
+		if code != ConnectCodeOK {
+			return ConnectResponse{}, fmt.Errorf("connect response OK with non-OK code %s", code)
+		}
+		return ConnectResponse{OK: true, Code: ConnectCodeOK, Message: message}, nil
 	case ConnectStatusError:
-		return ConnectResponse{OK: false, Message: string(frame.Payload[3:])}, nil
+		if code == ConnectCodeOK {
+			return ConnectResponse{}, fmt.Errorf("connect response error with OK code")
+		}
+		return ConnectResponse{OK: false, Code: code, Message: message}, nil
 	default:
 		return ConnectResponse{}, fmt.Errorf("unknown connect response status %d", status)
 	}

@@ -233,16 +233,15 @@ Recommended conservative next slice:
 
 ### Option B: Protocol Response Codes
 
-`ConnectResponse` currently has only:
+`ConnectResponse` now carries a machine-readable response code in addition to OK/message:
 
 ```go
 OK bool
+Code ConnectCode
 Message string
 ```
 
-This means clients classify server rejections mostly by typed local error plus message text.
-
-A more robust protocol could include response codes:
+Current codes:
 
 ```text
 OK
@@ -251,6 +250,8 @@ ACCESS_DENIED
 TARGET_DIAL_FAILED
 UNSUPPORTED_PROTOCOL
 UNREACHABLE_EGRESS
+ROUTE_INVALID
+NEXT_HOP_UNREACHABLE
 INTERNAL_ERROR
 ```
 
@@ -261,17 +262,7 @@ Benefits:
 - future failover decisions can distinguish policy denial from temporary target dial failure
 - less reliance on message strings
 
-Costs:
-
-- protocol change
-- migration/update tests
-- need to decide stable code names and semantics
-
-Recommended next slice if choosing this path:
-
-- extend `ConnectResponse` payload with a response code while protocol version is still experimental
-- update server rejection paths to emit codes
-- update client to return typed errors based on codes
+This is the first step toward explicit multi-hop routing because future relay decisions can distinguish routing failures from policy and target failures.
 
 ### Option C: Configurable Runtime Policy
 
@@ -363,5 +354,6 @@ load balancing?
 A conservative implementation path would be:
 
 1. Keep explicit `egress` as the only supported multi-upstream selection mode.
-2. Add protocol response codes so future routing decisions are not string-based.
-3. Then add optional failover lists for new local TCP connections only.
+2. Use the existing protocol response codes so future routing decisions are not string-based.
+3. Add route config/validation for a first explicit-route multi-hop version.
+4. Then add optional failover lists for new local TCP connections only.

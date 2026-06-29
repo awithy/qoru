@@ -34,14 +34,19 @@ func (e *ReconnectBackoffError) Unwrap() error {
 }
 
 type ConnectRejectedError struct {
+	Code    protocol.ConnectCode
 	Message string
 }
 
 func (e *ConnectRejectedError) Error() string {
-	if e.Message == "" {
-		return "connect rejected"
+	prefix := "connect rejected"
+	if e.Code != protocol.ConnectCodeOK {
+		prefix += ": " + e.Code.String()
 	}
-	return "connect rejected: " + e.Message
+	if e.Message == "" {
+		return prefix
+	}
+	return prefix + ": " + e.Message
 }
 
 func isConnectRejected(err error) bool {
@@ -88,7 +93,7 @@ func OpenTCPStream(ctx context.Context, conn *quic.Conn, service, egress string)
 	}
 	if !resp.OK {
 		_ = stream.Close()
-		return nil, &ConnectRejectedError{Message: resp.Message}
+		return nil, &ConnectRejectedError{Code: resp.Code, Message: resp.Message}
 	}
 
 	return stream, nil
