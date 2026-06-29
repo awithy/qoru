@@ -25,6 +25,7 @@ TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
 - Named TCP services on the server.
 - Per-service peer authorization.
 - Optional one-hop egress selection.
+- Explicit-route multi-hop TCP forwarding using configured next-hop servers.
 - Server-side TCP target dialing and byte proxying.
 - SPIFFE-style URI SAN node identities in mTLS certificates.
 - Development certificate generation.
@@ -132,19 +133,20 @@ forwards:
     egress: server-1
 ```
 
-A forward may also include a one-hop `route` to the selected direct upstream as preparation for future explicit multi-hop routing:
+A forward may also include an explicit `route`. The first hop must be a configured direct upstream server, and the final hop is the egress node:
 
 ```yaml
 forwards:
   - protocol: tcp
     listen: 127.0.0.1:15432
     service: echo
-    egress: server-1
+    egress: relay-b
     route:
-      - server-1
+      - relay-a
+      - relay-b
 ```
 
-Multi-hop routes are not implemented yet and are rejected by validation for now.
+Explicit multi-hop routing currently uses hop-by-hop QUIC/mTLS. End-to-end payload encryption through intermediary relays is not implemented yet.
 
 A client can configure multiple direct upstream servers. In that case each forward must set `egress` to a configured server ID:
 
@@ -210,12 +212,11 @@ Near-term:
 - Improve active connection shutdown behavior.
 - Improve service dial failure behavior for local TCP clients.
 - Add better reconnect observability and clearer server-side session handling.
-- Add explicit route config/validation for a first multi-hop version.
+- Add automated explicit-route multi-hop smoke testing and demo config.
 - Add richer service selection semantics for future multi-egress/load-balanced service routing.
 
 Longer-term:
 
-- Multi-hop forwarding.
 - End-to-end encrypted payload frames.
 - UDP support.
 - Topology/status commands.

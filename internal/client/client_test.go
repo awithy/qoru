@@ -79,6 +79,61 @@ func TestRunListensAndProxiesLocalTCP(t *testing.T) {
 	cancelAndWaitForServer(t, serverCancel, serverErr)
 }
 
+func TestRunProxiesExplicitMultiHopRoute(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	targetListener := startEchoTCPServer(t)
+
+	egressCfg := &config.Config{
+		NodeID:   "relay-b",
+		Mode:     config.ModeServer,
+		Identity: makeDevNodeCert(t, "relay-b"),
+		Listen:   "127.0.0.1:0",
+		Services: []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: targetListener.Addr().String(), Peers: []string{"relay-a"}}},
+	}
+	egressAddr, egressErr := startTestServerWithConfig(t, ctx, logger, egressCfg, nil)
+
+	relayCfg := &config.Config{
+		NodeID:   "relay-a",
+		Mode:     config.ModeServer,
+		Identity: makeDevNodeCert(t, "relay-a"),
+		Listen:   "127.0.0.1:0",
+		Servers:  []config.ServerConfig{{ID: "relay-b", Address: egressAddr}},
+	}
+	relayAddr, relayErr := startTestServerWithConfig(t, ctx, logger, relayCfg, nil)
+
+	clientCtx, clientCancel := context.WithCancel(context.Background())
+	defer clientCancel()
+	clientCfg := testClientConfig(relayAddr)
+	clientCfg.Servers = []config.ServerConfig{{ID: "relay-a", Address: relayAddr}}
+	clientCfg.Forwards[0].Listen = "127.0.0.1:0"
+	clientCfg.Forwards[0].Egress = "relay-b"
+	clientCfg.Forwards[0].Route = []string{"relay-a", "relay-b"}
+
+	clientStarted := make(chan string, 1)
+	clientErr := make(chan error, 1)
+	go func() {
+		clientErr <- Run(clientCtx, clientCfg, logger, WithStartedFunc(func(addr string) { clientStarted <- addr }))
+	}()
+
+	clientAddr := waitForClientAddr(t, clientStarted, clientErr)
+	assertEcho(t, clientAddr, "hop!")
+
+	clientCancel()
+	select {
+	case err := <-clientErr:
+		if err != nil {
+			t.Fatalf("expected clean client shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for client shutdown")
+	}
+	cancelAndWaitForServer(t, cancel, relayErr)
+	cancelAndWaitForServer(t, func() {}, egressErr)
+}
+
 func TestRunListensOnMultipleForwards(t *testing.T) {
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	defer serverCancel()

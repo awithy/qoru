@@ -28,7 +28,8 @@ Implemented today:
 - Multiple local TCP forwards.
 - Server support for multiple streams per QUIC connection.
 - Server-side named TCP services with per-service peer authorization.
-- Optional one-hop egress selection; selected egress must currently be the connected server.
+- Optional one-hop egress selection; selected egress must currently be the connected server unless an explicit route is provided.
+- Explicit-route multi-hop TCP forwarding through configured next-hop servers.
 - Server-side TCP target dialing with timeout and basic service target address validation.
 - `ConnectResponse` success/failure handshake before raw TCP proxying begins.
 - Bidirectional byte proxying between local TCP, QUIC streams, and server-side TCP targets.
@@ -36,7 +37,7 @@ Implemented today:
 Not implemented yet:
 
 - resuming active proxied TCP connections across upstream QUIC reconnects
-- multi-hop forwarding
+- automatic multi-hop route selection
 - end-to-end encrypted payload frames
 - UDP forwarding
 
@@ -181,7 +182,7 @@ forwards:
 
 The client requests a named service. Service names are currently resolved on the selected direct upstream server. `egress` is optional when exactly one upstream server is configured; empty means that server may satisfy the request. When multiple upstream servers are configured, each forward must set `egress` to one configured server ID. In the current one-hop implementation, the selected server also requires any non-empty request `egress` to match its own `node_id`.
 
-A forward may include a `route` field as preparation for explicit multi-hop routing. The current runtime only supports empty routes or a one-hop route to a configured direct upstream server:
+A forward may include a `route` field for explicit multi-hop routing. The first hop must be a configured direct upstream server. The final hop is the egress node:
 
 ```yaml
 forwards:
@@ -190,10 +191,11 @@ forwards:
     service: echo
     egress: server-1
     route:
-      - server-1
+      - relay-a
+      - relay-b
 ```
 
-Multi-hop routes are part of the target model but are rejected by validation until relay forwarding is implemented.
+When a relay receives a routed request, the route is interpreted as the remaining path beginning with the current node. The relay validates `route[0] == node_id`; if more hops remain, it dials `route[1]`, forwards the request with the current hop removed, and proxies stream bytes. The first multi-hop implementation uses hop-by-hop QUIC/mTLS only; intermediary relays can observe raw proxied bytes until end-to-end payload encryption is added.
 
 A client may configure multiple direct upstream servers:
 
@@ -253,9 +255,10 @@ Client required fields:
 - each `servers[]` entry requires `id` and `address`
 - at least one `forwards` entry
 - each forward requires `protocol: tcp`, `listen`, and `service`; `egress` is optional with one upstream server and required with multiple upstream servers
-- `route` is optional; when set today it must contain exactly one configured direct upstream server
+- `route` is optional; when set, it must be non-empty and contain no empty hops
+- route length is capped at `3` hops for the first multi-hop implementation
+- the first route hop must match a configured direct upstream server
 - if both `route` and `egress` are set, `egress` must match the final route hop
-- multi-hop `route` values are rejected until relay forwarding is implemented
 
 Server required fields:
 
@@ -265,6 +268,7 @@ Server required fields:
 Server service fields:
 
 - `services`: named protocol-aware services this server can provide. Each service has `name`, `protocol`, `target`, and optional `peers`. If `peers` is omitted or empty, any authenticated peer may use that service.
+- `servers`: optional configured next-hop peers this server may dial when acting as an intermediary relay for an explicit multi-hop route. Each entry uses the same `id`/`address` shape as client upstream servers.
 
 ## TLS and Identity
 
@@ -343,7 +347,7 @@ repeated route_count times:
   hop        []byte
 ```
 
-`route` is currently carried on the wire for explicit-route preparation. Runtime validation still rejects multi-hop routes until relay forwarding is implemented.
+`route` carries the remaining explicit path beginning with the node currently receiving the request. A relay forwards with the current hop removed, so `[relay-a, relay-b]` becomes `[relay-b]` when `relay-a` forwards to `relay-b`.
 
 ### `ConnectResponse`
 
@@ -469,7 +473,7 @@ The current server runtime lives in `internal/server`.
 13. if OK, proxies bytes between the QUIC stream and TCP target
 14. exits cleanly when the context is canceled
 
-Current limitation: service requests are one-hop only. If `egress` is set, it must match the connected server's `node_id`; multi-hop routing to another egress is not implemented yet.
+For routed requests, the receiving server validates that the first remaining route hop is its own `node_id`. If additional hops remain, it dials the next configured server, forwards the request with its own hop removed from `route`, relays the downstream `ConnectResponse` back upstream, and then proxies raw bytes between QUIC streams.
 
 ## CLI Runtime Wiring
 
@@ -546,6 +550,6 @@ docs/                  design documentation
 2. Add clearer local TCP behavior when service setup/dialing fails.
 3. Improve reconnect observability and clearer server-side session handling.
 4. Consider configurable log level/log format and timeout settings.
-5. Add route config and validation for the first explicit-route multi-hop implementation.
+5. Add an automated explicit-route multi-hop smoke test and demo config.
 6. Add richer service selection semantics for future multi-egress/load-balanced service routing.
 7. Later: end-to-end encrypted payload frames.

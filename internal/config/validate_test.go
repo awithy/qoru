@@ -84,11 +84,12 @@ func TestValidateClientRejectsEgressRouteMismatch(t *testing.T) {
 	}
 }
 
-func TestValidateClientRejectsMultiHopRouteForNow(t *testing.T) {
+func TestValidateClientAcceptsMultiHopRoute(t *testing.T) {
 	cfg := validClientConfig()
+	cfg.Forwards[0].Egress = "server-2"
 	cfg.Forwards[0].Route = []string{"server-1", "server-2"}
-	if err := ValidateClient(&cfg); err == nil {
-		t.Fatal("expected multi-hop route to be rejected until implemented")
+	if err := ValidateClient(&cfg); err != nil {
+		t.Fatalf("expected multi-hop route to be accepted, got %v", err)
 	}
 }
 

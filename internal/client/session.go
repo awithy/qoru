@@ -72,9 +72,16 @@ func (s *upstreamSessions) ConnectAll(ctx context.Context) error {
 }
 
 func (s *upstreamSessions) OpenTCPStream(ctx context.Context, service, egress string, route []string) (*quic.Stream, error) {
-	session, selectedEgress, err := s.selectSession(egress)
+	selector := egress
+	if len(route) > 0 {
+		selector = route[0]
+	}
+	session, selectedEgress, err := s.selectSession(selector)
 	if err != nil {
 		return nil, err
+	}
+	if len(route) > 0 {
+		selectedEgress = egress
 	}
 	return session.OpenTCPStream(ctx, service, selectedEgress, route)
 }
