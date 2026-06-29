@@ -152,9 +152,21 @@ func handleLocalConnection(ctx context.Context, session upstreamSession, service
 	if err != nil {
 		if logger != nil {
 			var rejected *ConnectRejectedError
-			if errors.As(err, &rejected) {
+			var backoff *ReconnectBackoffError
+			switch {
+			case errors.As(err, &rejected):
 				logger.Warn("tcp service rejected", "service", service, "egress", egress, "error", err)
-			} else {
+			case errors.As(err, &backoff):
+				logger.Warn(
+					"upstream reconnect backoff active",
+					"service", service,
+					"egress", egress,
+					"server_id", backoff.ServerID,
+					"addr", backoff.Address,
+					"next_attempt", backoff.NextAttempt.Format(time.RFC3339Nano),
+					"error", err,
+				)
+			default:
 				logger.Error("open tcp stream failed", "service", service, "egress", egress, "error", err)
 			}
 		}

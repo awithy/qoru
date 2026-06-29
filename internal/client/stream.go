@@ -14,6 +14,25 @@ import (
 
 const defaultQUICDialTimeout = 10 * time.Second
 
+type ReconnectBackoffError struct {
+	ServerID    string
+	Address     string
+	NextAttempt time.Time
+	Err         error
+}
+
+func (e *ReconnectBackoffError) Error() string {
+	msg := "upstream reconnect backoff active until " + e.NextAttempt.Format(time.RFC3339Nano)
+	if e.Err != nil {
+		return msg + ": " + e.Err.Error()
+	}
+	return msg
+}
+
+func (e *ReconnectBackoffError) Unwrap() error {
+	return e.Err
+}
+
 type ConnectRejectedError struct {
 	Message string
 }

@@ -177,10 +177,12 @@ func (s *reconnectingUpstreamSession) connection(ctx context.Context) (*quic.Con
 
 	now := s.now()
 	if !s.nextDial.IsZero() && now.Before(s.nextDial) {
-		if s.lastDialErr != nil {
-			return nil, fmt.Errorf("upstream reconnect backoff active until %s: %w", s.nextDial.Format(time.RFC3339Nano), s.lastDialErr)
+		return nil, &ReconnectBackoffError{
+			ServerID:    s.server.ID,
+			Address:     s.server.Address,
+			NextAttempt: s.nextDial,
+			Err:         s.lastDialErr,
 		}
-		return nil, fmt.Errorf("upstream reconnect backoff active until %s", s.nextDial.Format(time.RFC3339Nano))
 	}
 
 	hadFailures := s.backoffFailCount > 0

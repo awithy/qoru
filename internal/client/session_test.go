@@ -33,8 +33,13 @@ func TestReconnectingUpstreamSessionBackoffFailsFastWithoutSleeping(t *testing.T
 		t.Fatalf("expected next dial %s, got %s", want, session.nextDial)
 	}
 
-	if _, err := session.connection(context.Background()); err == nil {
+	_, err := session.connection(context.Background())
+	if err == nil {
 		t.Fatal("expected backoff error")
+	}
+	var backoff *ReconnectBackoffError
+	if !errors.As(err, &backoff) {
+		t.Fatalf("expected ReconnectBackoffError, got %T: %v", err, err)
 	}
 	if attempts != 1 {
 		t.Fatalf("expected no dial attempt during backoff, got %d", attempts)
