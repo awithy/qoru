@@ -5,4 +5,6 @@
 - HA
 - node health
 - monitoring
+- docker deployment
+
 
