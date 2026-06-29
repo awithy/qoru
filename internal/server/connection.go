@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/awithy/qoru/internal/config"
@@ -15,8 +16,6 @@ import (
 const defaultTCPDialTimeout = 10 * time.Second
 
 func handleConnection(ctx context.Context, cfg *config.Config, conn *quic.Conn, logger *slog.Logger, opts options) {
-	defer conn.CloseWithError(0, "done")
-
 	peerID, err := identity.PeerNodeID(conn.ConnectionState().TLS)
 	if err != nil {
 		if logger != nil {
@@ -29,15 +28,24 @@ func handleConnection(ctx context.Context, cfg *config.Config, conn *quic.Conn, 
 		logger.Info("peer connected", "peer_id", peerID)
 	}
 
+	var streamWG sync.WaitGroup
 	for {
 		stream, err := conn.AcceptStream(ctx)
 		if err != nil {
 			if ctx.Err() == nil && logger != nil {
 				logger.Error("accept stream failed", "error", err)
 			}
+			_ = conn.CloseWithError(0, "done")
+			if waitErr := waitGroupTimeout(&streamWG, defaultShutdownWaitTimeout); waitErr != nil && logger != nil {
+				logger.Warn("timed out waiting for streams to close", "peer_id", peerID, "error", waitErr)
+			}
 			return
 		}
-		go handleStream(ctx, cfg, peerID, stream, logger, opts)
+		streamWG.Add(1)
+		go func() {
+			defer streamWG.Done()
+			handleStream(ctx, cfg, peerID, stream, logger, opts)
+		}()
 	}
 }
 

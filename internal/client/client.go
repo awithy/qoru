@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/awithy/qoru/internal/config"
@@ -13,7 +14,10 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-const defaultQUICDialTimeout = 10 * time.Second
+const (
+	defaultQUICDialTimeout     = 10 * time.Second
+	defaultShutdownWaitTimeout = 5 * time.Second
+)
 
 type options struct {
 	started func(addr string)
@@ -46,7 +50,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 	if err != nil {
 		return err
 	}
-	defer conn.CloseWithError(0, "done")
 
 	listeners := make([]forwardListener, 0, len(cfg.Forwards))
 	for _, forward := range cfg.Forwards {
@@ -57,16 +60,28 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 		}
 		listeners = append(listeners, forwardListener{forward: forward, listener: listener})
 	}
-	defer closeListeners(listeners)
 
-	go func() {
-		<-ctx.Done()
-		closeListeners(listeners)
-	}()
-
+	var acceptWG sync.WaitGroup
+	var handlerWG sync.WaitGroup
 	errCh := make(chan error, len(listeners))
 	for _, item := range listeners {
-		go acceptForward(ctx, conn, item.forward, item.listener, logger, errCh)
+		acceptWG.Add(1)
+		go func(item forwardListener) {
+			defer acceptWG.Done()
+			acceptForward(ctx, conn, item.forward, item.listener, logger, errCh, &handlerWG)
+		}(item)
+	}
+
+	shutdown := func(reason string) error {
+		closeListeners(listeners)
+		_ = conn.CloseWithError(0, reason)
+		if err := waitGroupTimeout(&acceptWG, defaultShutdownWaitTimeout); err != nil {
+			return fmt.Errorf("client accept shutdown: %w", err)
+		}
+		if err := waitGroupTimeout(&handlerWG, defaultShutdownWaitTimeout); err != nil {
+			return fmt.Errorf("client connection shutdown: %w", err)
+		}
+		return nil
 	}
 
 	for _, item := range listeners {
@@ -81,18 +96,28 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 
 	select {
 	case <-ctx.Done():
-		return nil
+		return shutdown("context canceled")
 	case <-conn.Context().Done():
 		if ctx.Err() != nil {
-			return nil
+			return shutdown("context canceled")
 		}
+		shutdownErr := shutdown("quic connection closed")
 		if err := conn.Context().Err(); err != nil {
+			if shutdownErr != nil {
+				return fmt.Errorf("quic connection closed: %w; %v", err, shutdownErr)
+			}
 			return fmt.Errorf("quic connection closed: %w", err)
+		}
+		if shutdownErr != nil {
+			return shutdownErr
 		}
 		return fmt.Errorf("quic connection closed")
 	case err := <-errCh:
 		if ctx.Err() != nil {
-			return nil
+			return shutdown("context canceled")
+		}
+		if shutdownErr := shutdown("listener error"); shutdownErr != nil {
+			return fmt.Errorf("%w; %v", err, shutdownErr)
 		}
 		return err
 	}
@@ -104,7 +129,7 @@ func closeListeners(listeners []forwardListener) {
 	}
 }
 
-func acceptForward(ctx context.Context, conn *quic.Conn, forward config.ForwardConfig, listener net.Listener, logger *slog.Logger, errCh chan<- error) {
+func acceptForward(ctx context.Context, conn *quic.Conn, forward config.ForwardConfig, listener net.Listener, logger *slog.Logger, errCh chan<- error, handlerWG *sync.WaitGroup) {
 	for {
 		localConn, err := listener.Accept()
 		if err != nil {
@@ -114,7 +139,26 @@ func acceptForward(ctx context.Context, conn *quic.Conn, forward config.ForwardC
 			errCh <- err
 			return
 		}
-		go handleLocalConnection(ctx, conn, forward.Service, forward.Egress, localConn, logger)
+		handlerWG.Add(1)
+		go func() {
+			defer handlerWG.Done()
+			handleLocalConnection(ctx, conn, forward.Service, forward.Egress, localConn, logger)
+		}()
+	}
+}
+
+func waitGroupTimeout(wg *sync.WaitGroup, timeout time.Duration) error {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("timed out after %s", timeout)
 	}
 }
 
