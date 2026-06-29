@@ -306,7 +306,7 @@ Runtime commands use Go's standard `log/slog` text handler, which emits logfmt-s
 time=... level=INFO msg="server listening" node_id=server-1 addr=127.0.0.1:4433
 ```
 
-Runtime logs currently go to stdout.
+Runtime logs go to stderr so stdout can remain available for command output.
 
 Client reconnect observability is split between upstream-session events and local TCP setup events:
 

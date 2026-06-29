@@ -70,12 +70,15 @@ forwards:
 		server: runServer,
 	})
 
-	out, err := executeCommand(cmd, "client", "-c", path)
+	stdout, stderr, err := executeCommandStreams(cmd, "client", "-c", path)
 	if err != nil {
 		t.Fatalf("expected client command to succeed: %v", err)
 	}
-	if !strings.Contains(out, "msg=\"client runner called\"") || !strings.Contains(out, "node_id=client-1") {
-		t.Fatalf("unexpected output: %q", out)
+	if stdout != "" {
+		t.Fatalf("expected no stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "msg=\"client runner called\"") || !strings.Contains(stderr, "node_id=client-1") {
+		t.Fatalf("unexpected stderr: %q", stderr)
 	}
 }
 
@@ -102,12 +105,15 @@ listen: 127.0.0.1:4433
 		},
 	})
 
-	out, err := executeCommand(cmd, "server", "-c", path)
+	stdout, stderr, err := executeCommandStreams(cmd, "server", "-c", path)
 	if err != nil {
 		t.Fatalf("expected server command to succeed: %v", err)
 	}
-	if !strings.Contains(out, "msg=\"server runner called\"") || !strings.Contains(out, "node_id=server-1") {
-		t.Fatalf("unexpected output: %q", out)
+	if stdout != "" {
+		t.Fatalf("expected no stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "msg=\"server runner called\"") || !strings.Contains(stderr, "node_id=server-1") {
+		t.Fatalf("unexpected stderr: %q", stderr)
 	}
 }
 
@@ -145,12 +151,18 @@ listen: 127.0.0.1:4433
 }
 
 func executeCommand(cmd *cobra.Command, args ...string) (string, error) {
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
+	stdout, stderr, err := executeCommandStreams(cmd, args...)
+	return stdout + stderr, err
+}
+
+func executeCommandStreams(cmd *cobra.Command, args ...string) (string, string, error) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
 	cmd.SetArgs(args)
 	err := cmd.Execute()
-	return out.String(), err
+	return stdout.String(), stderr.String(), err
 }
 
 func writeTestConfig(t *testing.T, content string) string {

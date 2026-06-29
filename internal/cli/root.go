@@ -111,7 +111,7 @@ func newPrintConfigCommand(opts *rootOptions) *cobra.Command {
 }
 
 func newLogger(cmd *cobra.Command) *slog.Logger {
-	return slog.New(slog.NewTextHandler(cmd.OutOrStdout(), nil))
+	return slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
 }
 
 func loadConfig(opts *rootOptions) (*config.Config, string, error) {
