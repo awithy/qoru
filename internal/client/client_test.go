@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -243,7 +244,7 @@ func TestMultipleStreamsOnOneQUICConnection(t *testing.T) {
 	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, nil)
 	clientCfg := testClientConfig(addr)
 
-	conn, err := Connect(ctx, clientCfg, logger)
+	conn, err := connectTestClient(ctx, clientCfg, logger)
 	if err != nil {
 		t.Fatalf("expected client to connect: %v", err)
 	}
@@ -274,7 +275,7 @@ func TestOpenTCPStreamReturnsTargetDialError(t *testing.T) {
 	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, nil)
 	clientCfg := testClientConfig(addr)
 
-	conn, err := Connect(ctx, clientCfg, logger)
+	conn, err := connectTestClient(ctx, clientCfg, logger)
 	if err != nil {
 		t.Fatalf("expected client to connect: %v", err)
 	}
@@ -306,7 +307,7 @@ func TestOpenTCPStreamReturnsEgressError(t *testing.T) {
 	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, nil)
 	clientCfg := testClientConfig(addr)
 
-	conn, err := Connect(ctx, clientCfg, logger)
+	conn, err := connectTestClient(ctx, clientCfg, logger)
 	if err != nil {
 		t.Fatalf("expected client to connect: %v", err)
 	}
@@ -337,7 +338,7 @@ func TestOpenTCPStreamReturnsTargetPolicyError(t *testing.T) {
 	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, nil)
 	clientCfg := testClientConfig(addr)
 
-	conn, err := Connect(ctx, clientCfg, logger)
+	conn, err := connectTestClient(ctx, clientCfg, logger)
 	if err != nil {
 		t.Fatalf("expected client to connect: %v", err)
 	}
@@ -358,7 +359,7 @@ func TestOpenTCPStreamReturnsTargetPolicyError(t *testing.T) {
 	cancelAndWaitForServer(t, cancel, serverErr)
 }
 
-func TestConnectTCPProxiesBytesToTarget(t *testing.T) {
+func TestOpenTCPStreamProxiesBytesToTarget(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -370,11 +371,16 @@ func TestConnectTCPProxiesBytesToTarget(t *testing.T) {
 	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, func(req protocol.ConnectRequest) { received <- req })
 
 	clientCfg := testClientConfig(addr)
-	conn, stream, err := ConnectTCP(ctx, clientCfg, "echo", "", logger)
+	conn, err := connectTestClient(ctx, clientCfg, logger)
 	if err != nil {
 		t.Fatalf("expected client to connect: %v", err)
 	}
 	defer conn.CloseWithError(0, "done")
+
+	stream, err := OpenTCPStream(ctx, conn, "echo", "")
+	if err != nil {
+		t.Fatalf("open stream: %v", err)
+	}
 
 	if _, err := stream.Write([]byte("ping")); err != nil {
 		t.Fatalf("write to stream: %v", err)
@@ -401,6 +407,16 @@ func TestConnectTCPProxiesBytesToTarget(t *testing.T) {
 	}
 
 	cancelAndWaitForServer(t, cancel, serverErr)
+}
+
+func connectTestClient(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*quic.Conn, error) {
+	if err := config.ValidateClient(cfg); err != nil {
+		return nil, err
+	}
+	if len(cfg.Servers) != 1 {
+		return nil, fmt.Errorf("test client config must have exactly one server")
+	}
+	return ConnectToServer(ctx, cfg.NodeID, cfg.Identity, cfg.Servers[0], logger)
 }
 
 func waitForClientAddr(t *testing.T, started <-chan string, clientErr <-chan error) string {

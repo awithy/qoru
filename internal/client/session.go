@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -166,9 +165,4 @@ func (s *reconnectingUpstreamSession) dropConnection(conn *quic.Conn, reason str
 		_ = s.conn.CloseWithError(0, reason)
 		s.conn = nil
 	}
-}
-
-func isConnectRejected(err error) bool {
-	var rejected *ConnectRejectedError
-	return errors.As(err, &rejected)
 }

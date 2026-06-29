@@ -10,15 +10,9 @@ import (
 	"time"
 
 	"github.com/awithy/qoru/internal/config"
-	"github.com/awithy/qoru/internal/identity"
-	"github.com/awithy/qoru/internal/protocol"
-	"github.com/quic-go/quic-go"
 )
 
-const (
-	defaultQUICDialTimeout     = 10 * time.Second
-	defaultShutdownWaitTimeout = 5 * time.Second
-)
+const defaultShutdownWaitTimeout = 5 * time.Second
 
 type options struct {
 	started func(addr string)
@@ -37,17 +31,6 @@ type forwardListener struct {
 	listener net.Listener
 }
 
-type ConnectRejectedError struct {
-	Message string
-}
-
-func (e *ConnectRejectedError) Error() string {
-	if e.Message == "" {
-		return "connect rejected"
-	}
-	return "connect rejected: " + e.Message
-}
-
 func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOptions ...Option) error {
 	if err := config.ValidateClient(cfg); err != nil {
 		return err
@@ -58,11 +41,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 		apply(&opts)
 	}
 
-	session, err := newUpstreamSessions(cfg, logger)
+	sessions, err := newUpstreamSessions(cfg, logger)
 	if err != nil {
 		return err
 	}
-	if err := session.ConnectAll(ctx); err != nil {
+	if err := sessions.ConnectAll(ctx); err != nil {
 		return err
 	}
 
@@ -83,13 +66,13 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 		acceptWG.Add(1)
 		go func(item forwardListener) {
 			defer acceptWG.Done()
-			acceptForward(ctx, session, item.forward, item.listener, logger, errCh, &handlerWG)
+			acceptForward(ctx, sessions, item.forward, item.listener, logger, errCh, &handlerWG)
 		}(item)
 	}
 
 	shutdown := func(reason string) error {
 		closeListeners(listeners)
-		session.Close(reason)
+		sessions.Close(reason)
 		if err := waitGroupTimeout(&acceptWG, defaultShutdownWaitTimeout); err != nil {
 			return fmt.Errorf("client accept shutdown: %w", err)
 		}
@@ -179,74 +162,4 @@ func handleLocalConnection(ctx context.Context, session upstreamSession, service
 	}
 
 	proxyTCP(localConn, stream)
-}
-
-func Connect(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*quic.Conn, error) {
-	if err := config.ValidateClient(cfg); err != nil {
-		return nil, err
-	}
-	if len(cfg.Servers) != 1 {
-		return nil, fmt.Errorf("Connect requires exactly one configured server")
-	}
-	return ConnectToServer(ctx, cfg.NodeID, cfg.Identity, cfg.Servers[0], logger)
-}
-
-func ConnectToServer(ctx context.Context, nodeID string, identityCfg config.IdentityConfig, serverCfg config.ServerConfig, logger *slog.Logger) (*quic.Conn, error) {
-	tlsConfig, err := identity.ClientTLSConfig(identityCfg, serverCfg.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	dialCtx, cancel := context.WithTimeout(ctx, defaultQUICDialTimeout)
-	defer cancel()
-
-	conn, err := quic.DialAddr(dialCtx, serverCfg.Address, tlsConfig, &quic.Config{})
-	if err != nil {
-		return nil, err
-	}
-
-	if logger != nil {
-		logger.Info("client connected", "node_id", nodeID, "server_id", serverCfg.ID, "addr", serverCfg.Address)
-	}
-
-	return conn, nil
-}
-
-func OpenTCPStream(ctx context.Context, conn *quic.Conn, service, egress string) (*quic.Stream, error) {
-	stream, err := conn.OpenStreamSync(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := protocol.WriteConnectRequest(stream, protocol.ConnectRequest{Protocol: "tcp", Service: service, Egress: egress}); err != nil {
-		_ = stream.Close()
-		return nil, err
-	}
-
-	resp, err := protocol.ReadConnectResponse(stream)
-	if err != nil {
-		_ = stream.Close()
-		return nil, err
-	}
-	if !resp.OK {
-		_ = stream.Close()
-		return nil, &ConnectRejectedError{Message: resp.Message}
-	}
-
-	return stream, nil
-}
-
-func ConnectTCP(ctx context.Context, cfg *config.Config, service, egress string, logger *slog.Logger) (*quic.Conn, *quic.Stream, error) {
-	conn, err := Connect(ctx, cfg, logger)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	stream, err := OpenTCPStream(ctx, conn, service, egress)
-	if err != nil {
-		_ = conn.CloseWithError(0, "open tcp stream failed")
-		return nil, nil, err
-	}
-
-	return conn, stream, nil
 }
