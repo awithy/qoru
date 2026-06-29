@@ -17,7 +17,7 @@ make gen-dev-certs
 In terminal 1:
 
 ```sh
-go run ./dev/echo-server.go -listen 127.0.0.1:9000
+go run ./dev/echo-server -listen 127.0.0.1:9000
 ```
 
 ## 3. Start qoru server

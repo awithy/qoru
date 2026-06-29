@@ -82,6 +82,14 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 	select {
 	case <-ctx.Done():
 		return nil
+	case <-conn.Context().Done():
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err := conn.Context().Err(); err != nil {
+			return fmt.Errorf("quic connection closed: %w", err)
+		}
+		return fmt.Errorf("quic connection closed")
 	case err := <-errCh:
 		if ctx.Err() != nil {
 			return nil
