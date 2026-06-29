@@ -56,7 +56,8 @@ func TestConfigShape(t *testing.T) {
 		Forwards: []ForwardConfig{{
 			Protocol: "tcp",
 			Listen:   "127.0.0.1:15432",
-			Target:   "127.0.0.1:5432",
+			Service:  "echo",
+			Egress:   "server-1",
 		}},
 	}
 
@@ -66,7 +67,7 @@ func TestConfigShape(t *testing.T) {
 	if cfg.Server == nil || cfg.Server.Address != "127.0.0.1:4433" {
 		t.Fatalf("unexpected server config: %#v", cfg.Server)
 	}
-	if len(cfg.Forwards) != 1 || cfg.Forwards[0].Target != "127.0.0.1:5432" {
+	if len(cfg.Forwards) != 1 || cfg.Forwards[0].Service != "echo" {
 		t.Fatalf("unexpected forwards: %#v", cfg.Forwards)
 	}
 }

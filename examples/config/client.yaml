@@ -13,4 +13,5 @@ server:
 forwards:
   - protocol: tcp
     listen: 127.0.0.1:15432
-    target: 127.0.0.1:9000
+    service: echo
+    egress: server-1

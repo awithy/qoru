@@ -3,22 +3,11 @@ package config
 import "testing"
 
 func validClientConfig() Config {
-	return Config{
-		NodeID:   "client-1",
-		Mode:     ModeClient,
-		Identity: IdentityConfig{Cert: "client.crt", Key: "client.key", CA: "ca.crt"},
-		Server:   &ServerConfig{ID: "server-1", Address: "127.0.0.1:4433"},
-		Forwards: []ForwardConfig{{Protocol: "tcp", Listen: "127.0.0.1:15432", Target: "127.0.0.1:5432"}},
-	}
+	return Config{NodeID: "client-1", Mode: ModeClient, Identity: IdentityConfig{Cert: "client.crt", Key: "client.key", CA: "ca.crt"}, Server: &ServerConfig{ID: "server-1", Address: "127.0.0.1:4433"}, Forwards: []ForwardConfig{{Protocol: "tcp", Listen: "127.0.0.1:15432", Service: "echo"}}}
 }
 
 func validServerConfig() Config {
-	return Config{
-		NodeID:   "server-1",
-		Mode:     ModeServer,
-		Identity: IdentityConfig{Cert: "server.crt", Key: "server.key", CA: "ca.crt"},
-		Listen:   "127.0.0.1:4433",
-	}
+	return Config{NodeID: "server-1", Mode: ModeServer, Identity: IdentityConfig{Cert: "server.crt", Key: "server.key", CA: "ca.crt"}, Listen: "127.0.0.1:4433", Services: []ServiceConfig{{Name: "echo", Protocol: "tcp", Target: "127.0.0.1:9000", Peers: []string{"client-1"}}}}
 }
 
 func TestValidateClientAcceptsValidConfig(t *testing.T) {
@@ -27,7 +16,6 @@ func TestValidateClientAcceptsValidConfig(t *testing.T) {
 		t.Fatalf("expected valid client config, got %v", err)
 	}
 }
-
 func TestValidateClientRejectsWrongMode(t *testing.T) {
 	cfg := validClientConfig()
 	cfg.Mode = ModeServer
@@ -35,7 +23,6 @@ func TestValidateClientRejectsWrongMode(t *testing.T) {
 		t.Fatal("expected wrong mode to be rejected")
 	}
 }
-
 func TestValidateClientRejectsMissingForward(t *testing.T) {
 	cfg := validClientConfig()
 	cfg.Forwards = nil
@@ -43,7 +30,6 @@ func TestValidateClientRejectsMissingForward(t *testing.T) {
 		t.Fatal("expected missing forward to be rejected")
 	}
 }
-
 func TestValidateClientRejectsMissingForwardProtocol(t *testing.T) {
 	cfg := validClientConfig()
 	cfg.Forwards[0].Protocol = ""
@@ -51,7 +37,6 @@ func TestValidateClientRejectsMissingForwardProtocol(t *testing.T) {
 		t.Fatal("expected missing forward protocol to be rejected")
 	}
 }
-
 func TestValidateClientRejectsUnsupportedForwardProtocol(t *testing.T) {
 	cfg := validClientConfig()
 	cfg.Forwards[0].Protocol = "udp"
@@ -59,14 +44,19 @@ func TestValidateClientRejectsUnsupportedForwardProtocol(t *testing.T) {
 		t.Fatal("expected unsupported forward protocol to be rejected")
 	}
 }
-
+func TestValidateClientRejectsMissingForwardService(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Forwards[0].Service = ""
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected missing forward service to be rejected")
+	}
+}
 func TestValidateServerAcceptsValidConfig(t *testing.T) {
 	cfg := validServerConfig()
 	if err := ValidateServer(&cfg); err != nil {
 		t.Fatalf("expected valid server config, got %v", err)
 	}
 }
-
 func TestValidateServerRejectsMissingListen(t *testing.T) {
 	cfg := validServerConfig()
 	cfg.Listen = ""
@@ -74,42 +64,27 @@ func TestValidateServerRejectsMissingListen(t *testing.T) {
 		t.Fatal("expected missing listen to be rejected")
 	}
 }
-
-func TestValidateServerAcceptsAllowedTargets(t *testing.T) {
+func TestValidateServerRejectsInvalidServiceProtocol(t *testing.T) {
 	cfg := validServerConfig()
-	cfg.AllowedTargets = []AllowedTargetConfig{
-		{Protocol: "tcp", Address: "127.0.0.1:9000"},
-		{Protocol: "udp", Address: "127.0.0.1:5353"},
-	}
-	if err := ValidateServer(&cfg); err != nil {
-		t.Fatalf("expected valid server config, got %v", err)
-	}
-}
-
-func TestValidateServerRejectsInvalidAllowedTargetProtocol(t *testing.T) {
-	cfg := validServerConfig()
-	cfg.AllowedTargets = []AllowedTargetConfig{{Protocol: "icmp", Address: "127.0.0.1:9000"}}
+	cfg.Services[0].Protocol = "icmp"
 	if err := ValidateServer(&cfg); err == nil {
-		t.Fatal("expected invalid allowed target protocol to be rejected")
+		t.Fatal("expected invalid service protocol to be rejected")
 	}
 }
-
-func TestValidateServerRejectsInvalidAllowedTargetAddress(t *testing.T) {
+func TestValidateServerRejectsInvalidServiceTarget(t *testing.T) {
 	cfg := validServerConfig()
-	cfg.AllowedTargets = []AllowedTargetConfig{{Protocol: "tcp", Address: "localhost"}}
+	cfg.Services[0].Target = "localhost"
 	if err := ValidateServer(&cfg); err == nil {
-		t.Fatal("expected invalid allowed target address to be rejected")
+		t.Fatal("expected invalid service target to be rejected")
 	}
 }
-
-func TestValidateServerRejectsEmptyAllowedTargetPeer(t *testing.T) {
+func TestValidateServerRejectsEmptyServicePeer(t *testing.T) {
 	cfg := validServerConfig()
-	cfg.AllowedTargets = []AllowedTargetConfig{{Protocol: "tcp", Address: "127.0.0.1:9000", Peers: []string{""}}}
+	cfg.Services[0].Peers = []string{""}
 	if err := ValidateServer(&cfg); err == nil {
-		t.Fatal("expected empty allowed target peer to be rejected")
+		t.Fatal("expected empty service peer to be rejected")
 	}
 }
-
 func TestValidateForMode(t *testing.T) {
 	client := validClientConfig()
 	server := validServerConfig()

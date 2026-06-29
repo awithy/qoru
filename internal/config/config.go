@@ -24,14 +24,7 @@ type Config struct {
 	Listen string        `yaml:"listen,omitempty"`
 
 	Forwards []ForwardConfig `yaml:"forwards,omitempty"`
-
-	AllowedTargets []AllowedTargetConfig `yaml:"allowed_targets,omitempty"`
-}
-
-type AllowedTargetConfig struct {
-	Protocol string   `yaml:"protocol"`
-	Address  string   `yaml:"address"`
-	Peers    []string `yaml:"peers,omitempty"`
+	Services []ServiceConfig `yaml:"services,omitempty"`
 }
 
 type IdentityConfig struct {
@@ -48,7 +41,15 @@ type ServerConfig struct {
 type ForwardConfig struct {
 	Protocol string `yaml:"protocol"`
 	Listen   string `yaml:"listen"`
-	Target   string `yaml:"target"`
+	Service  string `yaml:"service"`
+	Egress   string `yaml:"egress,omitempty"`
+}
+
+type ServiceConfig struct {
+	Name     string   `yaml:"name"`
+	Protocol string   `yaml:"protocol"`
+	Target   string   `yaml:"target"`
+	Peers    []string `yaml:"peers,omitempty"`
 }
 
 func ResolvePath(explicit string) (string, bool) {

@@ -72,7 +72,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 	for _, item := range listeners {
 		addr := item.listener.Addr().String()
 		if logger != nil {
-			logger.Info("client listening", "node_id", cfg.NodeID, "addr", addr, "target", item.forward.Target)
+			logger.Info("client listening", "node_id", cfg.NodeID, "addr", addr, "service", item.forward.Service, "egress", item.forward.Egress)
 		}
 		if opts.started != nil {
 			opts.started(addr)
@@ -114,17 +114,17 @@ func acceptForward(ctx context.Context, conn *quic.Conn, forward config.ForwardC
 			errCh <- err
 			return
 		}
-		go handleLocalConnection(ctx, conn, forward.Target, localConn, logger)
+		go handleLocalConnection(ctx, conn, forward.Service, forward.Egress, localConn, logger)
 	}
 }
 
-func handleLocalConnection(ctx context.Context, conn *quic.Conn, target string, localConn net.Conn, logger *slog.Logger) {
+func handleLocalConnection(ctx context.Context, conn *quic.Conn, service, egress string, localConn net.Conn, logger *slog.Logger) {
 	defer localConn.Close()
 
-	stream, err := OpenTCPStream(ctx, conn, target)
+	stream, err := OpenTCPStream(ctx, conn, service, egress)
 	if err != nil {
 		if logger != nil {
-			logger.Error("open tcp stream failed", "target", target, "error", err)
+			logger.Error("open tcp stream failed", "service", service, "egress", egress, "error", err)
 		}
 		return
 	}
@@ -157,13 +157,13 @@ func Connect(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*qui
 	return conn, nil
 }
 
-func OpenTCPStream(ctx context.Context, conn *quic.Conn, target string) (*quic.Stream, error) {
+func OpenTCPStream(ctx context.Context, conn *quic.Conn, service, egress string) (*quic.Stream, error) {
 	stream, err := conn.OpenStreamSync(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := protocol.WriteConnectRequest(stream, protocol.ConnectRequest{Protocol: "tcp", Target: target}); err != nil {
+	if err := protocol.WriteConnectRequest(stream, protocol.ConnectRequest{Protocol: "tcp", Service: service, Egress: egress}); err != nil {
 		_ = stream.Close()
 		return nil, err
 	}
@@ -184,13 +184,13 @@ func OpenTCPStream(ctx context.Context, conn *quic.Conn, target string) (*quic.S
 	return stream, nil
 }
 
-func ConnectTCP(ctx context.Context, cfg *config.Config, target string, logger *slog.Logger) (*quic.Conn, *quic.Stream, error) {
+func ConnectTCP(ctx context.Context, cfg *config.Config, service, egress string, logger *slog.Logger) (*quic.Conn, *quic.Stream, error) {
 	conn, err := Connect(ctx, cfg, logger)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	stream, err := OpenTCPStream(ctx, conn, target)
+	stream, err := OpenTCPStream(ctx, conn, service, egress)
 	if err != nil {
 		_ = conn.CloseWithError(0, "open tcp stream failed")
 		return nil, nil, err

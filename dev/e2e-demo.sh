@@ -105,9 +105,10 @@ identity:
   key: ./dev/certs/server-1.key
   ca: ./dev/certs/ca.crt
 listen: $SERVER_ADDR
-allowed_targets:
-  - protocol: tcp
-    address: $TARGET_ADDR
+services:
+  - name: echo
+    protocol: tcp
+    target: $TARGET_ADDR
     peers:
       - client-1
 EOF
@@ -125,7 +126,8 @@ server:
 forwards:
   - protocol: tcp
     listen: $CLIENT_ADDR
-    target: $TARGET_ADDR
+    service: echo
+    egress: server-1
 EOF
 
 echo "==> generating dev certs"

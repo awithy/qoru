@@ -72,7 +72,7 @@ Loads and validates client config, establishes one QUIC/mTLS connection to the c
 For each local TCP connection:
 
 1. open a new QUIC stream on the shared QUIC connection
-2. send `ConnectRequest{Protocol: "tcp"}`
+2. send `ConnectRequest{Protocol: "tcp", Service: "...", Egress: "..."}`
 3. read `ConnectResponse`
 4. if OK, proxy bytes between the local TCP connection and QUIC stream
 
@@ -108,10 +108,11 @@ server:
 forwards:
   - protocol: tcp
     listen: 127.0.0.1:15432
-    target: 127.0.0.1:9000
+    service: echo
+    egress: server-1
 ```
 
-For the first TCP proxy slice, the client is allowed to request any target. Server-side access policy is deferred to a future slice.
+The client requests a named service. `egress` is optional today; if set in the current one-hop implementation, it must match the connected server's `node_id`.
 
 ### Server config
 
@@ -126,10 +127,10 @@ identity:
 
 listen: 127.0.0.1:4433
 
-# Optional. If omitted or empty, any syntactically valid TCP target is allowed.
-allowed_targets:
-  - protocol: tcp
-    address: 127.0.0.1:9000
+services:
+  - name: echo
+    protocol: tcp
+    target: 127.0.0.1:9000
     peers:
       - client-1
 ```
@@ -150,16 +151,16 @@ Client required fields:
 - `server.id`
 - `server.address`
 - at least one `forwards` entry
-- each forward requires `protocol: tcp`, `listen`, and `target`
+- each forward requires `protocol: tcp`, `listen`, and `service`; `egress` is optional
 
 Server required fields:
 
 - `mode: server`
 - `listen`
 
-Optional server fields:
+Server service fields:
 
-- `allowed_targets`: protocol-aware exact targets the server may dial. Currently `protocol: tcp` is enforced; `protocol: udp` is accepted by config for future UDP support. Each entry may include `peers`; if omitted or empty, any authenticated peer may use that target. If `allowed_targets` is omitted or empty, the current development behavior allows any syntactically valid TCP target.
+- `services`: named protocol-aware services this server can provide. Each service has `name`, `protocol`, `target`, and optional `peers`. If `peers` is omitted or empty, any authenticated peer may use that service.
 
 ## TLS and Identity
 
@@ -221,15 +222,17 @@ MaxTargetLength = 4096
 
 ### `ConnectRequest`
 
-Sent by the client to ask the server to open a target for a protocol. Currently only `protocol: tcp` is supported at runtime.
+Sent by the client to ask the server to open a named service for a protocol. Currently only `protocol: tcp` is supported at runtime.
 
 Payload format:
 
 ```text
 protocol_len uint8
 protocol     []byte
-target_len   uint16 big endian
-target       []byte
+service_len  uint16 big endian
+service      []byte
+egress_len   uint16 big endian
+egress       []byte
 ```
 
 ### `ConnectResponse`
@@ -292,7 +295,7 @@ The current client runtime lives in `internal/client`.
 3. binds one local TCP listener per configured `forwards` entry
 4. starts accept loops for all listeners
 5. for each local TCP connection, opens a new QUIC stream on the shared connection
-6. sends `ConnectRequest{Protocol: "tcp"}`
+6. sends `ConnectRequest{Protocol: "tcp", Service: "...", Egress: "..."}`
 7. waits for `ConnectResponse`
 8. proxies bytes between the local TCP connection and QUIC stream
 9. exits cleanly when the context is canceled
@@ -326,7 +329,7 @@ The current server runtime lives in `internal/server`.
 11. if OK, proxies bytes between the QUIC stream and TCP target
 12. exits cleanly when the context is canceled
 
-Current limitation: access policy is exact target and peer based. If `allowed_targets` is empty, any authenticated client can request any syntactically valid TCP target address reachable from the server.
+Current limitation: service requests are one-hop only. If `egress` is set, it must match the connected server's `node_id`; multi-hop routing to another egress is not implemented yet.
 
 ## CLI Runtime Wiring
 

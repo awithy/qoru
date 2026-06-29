@@ -10,7 +10,7 @@ import (
 
 func TestConnectRequestRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
-	want := ConnectRequest{Protocol: "tcp", Target: "127.0.0.1:5432"}
+	want := ConnectRequest{Protocol: "tcp", Service: "echo", Egress: "server-1"}
 
 	if err := WriteConnectRequest(&buf, want); err != nil {
 		t.Fatalf("WriteConnectRequest returned error: %v", err)
@@ -60,21 +60,21 @@ func TestConnectResponseRoundTripError(t *testing.T) {
 }
 
 func TestWriteConnectRequestRejectsEmptyProtocol(t *testing.T) {
-	if err := WriteConnectRequest(io.Discard, ConnectRequest{Target: "127.0.0.1:5432"}); err == nil {
+	if err := WriteConnectRequest(io.Discard, ConnectRequest{Service: "echo"}); err == nil {
 		t.Fatal("expected empty protocol to be rejected")
 	}
 }
 
-func TestWriteConnectRequestRejectsEmptyTarget(t *testing.T) {
+func TestWriteConnectRequestRejectsEmptyService(t *testing.T) {
 	if err := WriteConnectRequest(io.Discard, ConnectRequest{Protocol: "tcp"}); err == nil {
-		t.Fatal("expected empty target to be rejected")
+		t.Fatal("expected empty service to be rejected")
 	}
 }
 
-func TestWriteConnectRequestRejectsTooLongTarget(t *testing.T) {
-	target := strings.Repeat("a", MaxTargetLength+1)
-	if err := WriteConnectRequest(io.Discard, ConnectRequest{Protocol: "tcp", Target: target}); err == nil {
-		t.Fatal("expected too-long target to be rejected")
+func TestWriteConnectRequestRejectsTooLongService(t *testing.T) {
+	service := strings.Repeat("a", MaxTargetLength+1)
+	if err := WriteConnectRequest(io.Discard, ConnectRequest{Protocol: "tcp", Service: service}); err == nil {
+		t.Fatal("expected too-long service to be rejected")
 	}
 }
 

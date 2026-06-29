@@ -56,7 +56,8 @@ server:
 forwards:
   - protocol: tcp
     listen: 127.0.0.1:15432
-    target: 127.0.0.1:5432
+    service: echo
+    egress: server-1
 `)
 	cmd := newRootCommand(commandRunners{
 		client: func(_ context.Context, cfg *config.Config, logger *slog.Logger) error {

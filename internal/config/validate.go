@@ -9,7 +9,6 @@ func ValidateForMode(cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("config is nil")
 	}
-
 	switch cfg.Mode {
 	case ModeClient:
 		return ValidateClient(cfg)
@@ -54,11 +53,8 @@ func ValidateClient(cfg *Config) error {
 		if _, _, err := net.SplitHostPort(fwd.Listen); err != nil {
 			return fmt.Errorf("forwards[%d].listen must be host:port: %w", i, err)
 		}
-		if fwd.Target == "" {
-			return fmt.Errorf("forwards[%d].target is required", i)
-		}
-		if _, _, err := net.SplitHostPort(fwd.Target); err != nil {
-			return fmt.Errorf("forwards[%d].target must be host:port: %w", i, err)
+		if fwd.Service == "" {
+			return fmt.Errorf("forwards[%d].service is required", i)
 		}
 	}
 	return nil
@@ -74,22 +70,25 @@ func ValidateServer(cfg *Config) error {
 	if cfg.Listen == "" {
 		return fmt.Errorf("listen is required for server mode")
 	}
-	for i, target := range cfg.AllowedTargets {
-		if target.Protocol == "" {
-			return fmt.Errorf("allowed_targets[%d].protocol is required", i)
+	for i, svc := range cfg.Services {
+		if svc.Name == "" {
+			return fmt.Errorf("services[%d].name is required", i)
 		}
-		if target.Protocol != "tcp" && target.Protocol != "udp" {
-			return fmt.Errorf("allowed_targets[%d].protocol must be tcp or udp", i)
+		if svc.Protocol == "" {
+			return fmt.Errorf("services[%d].protocol is required", i)
 		}
-		if target.Address == "" {
-			return fmt.Errorf("allowed_targets[%d].address is required", i)
+		if svc.Protocol != "tcp" && svc.Protocol != "udp" {
+			return fmt.Errorf("services[%d].protocol must be tcp or udp", i)
 		}
-		if _, _, err := net.SplitHostPort(target.Address); err != nil {
-			return fmt.Errorf("allowed_targets[%d].address must be host:port: %w", i, err)
+		if svc.Target == "" {
+			return fmt.Errorf("services[%d].target is required", i)
 		}
-		for j, peer := range target.Peers {
+		if _, _, err := net.SplitHostPort(svc.Target); err != nil {
+			return fmt.Errorf("services[%d].target must be host:port: %w", i, err)
+		}
+		for j, peer := range svc.Peers {
 			if peer == "" {
-				return fmt.Errorf("allowed_targets[%d].peers[%d] is required", i, j)
+				return fmt.Errorf("services[%d].peers[%d] is required", i, j)
 			}
 		}
 	}

@@ -6,44 +6,34 @@ import (
 	"github.com/awithy/qoru/internal/config"
 )
 
-func TestAuthorizeTCPTargetAllowsAnyTargetWhenAllowlistEmpty(t *testing.T) {
-	cfg := &config.Config{}
-	if err := authorizeTCPTarget(cfg, "client-1", "127.0.0.1:9000"); err != nil {
-		t.Fatalf("expected target to be allowed, got %v", err)
+func TestResolveServiceAllowsServiceWithoutPeers(t *testing.T) {
+	cfg := &config.Config{Services: []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: "127.0.0.1:9000"}}}
+	svc, err := resolveService(cfg, "client-1", "tcp", "echo")
+	if err != nil {
+		t.Fatalf("expected service to be allowed, got %v", err)
+	}
+	if svc.Target != "127.0.0.1:9000" {
+		t.Fatalf("unexpected target %q", svc.Target)
 	}
 }
 
-func TestAuthorizeTCPTargetAllowsListedTargetWithoutPeers(t *testing.T) {
-	cfg := &config.Config{AllowedTargets: []config.AllowedTargetConfig{{Protocol: "tcp", Address: "127.0.0.1:9000"}}}
-	if err := authorizeTCPTarget(cfg, "client-1", "127.0.0.1:9000"); err != nil {
-		t.Fatalf("expected target to be allowed, got %v", err)
+func TestResolveServiceAllowsListedPeer(t *testing.T) {
+	cfg := &config.Config{Services: []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: "127.0.0.1:9000", Peers: []string{"client-1"}}}}
+	if _, err := resolveService(cfg, "client-1", "tcp", "echo"); err != nil {
+		t.Fatalf("expected service to be allowed, got %v", err)
 	}
 }
 
-func TestAuthorizeTCPTargetAllowsListedPeer(t *testing.T) {
-	cfg := &config.Config{AllowedTargets: []config.AllowedTargetConfig{{Protocol: "tcp", Address: "127.0.0.1:9000", Peers: []string{"client-1"}}}}
-	if err := authorizeTCPTarget(cfg, "client-1", "127.0.0.1:9000"); err != nil {
-		t.Fatalf("expected target to be allowed, got %v", err)
-	}
-}
-
-func TestAuthorizeTCPTargetRejectsUnlistedPeer(t *testing.T) {
-	cfg := &config.Config{AllowedTargets: []config.AllowedTargetConfig{{Protocol: "tcp", Address: "127.0.0.1:9000", Peers: []string{"client-1"}}}}
-	if err := authorizeTCPTarget(cfg, "client-2", "127.0.0.1:9000"); err == nil {
+func TestResolveServiceRejectsUnlistedPeer(t *testing.T) {
+	cfg := &config.Config{Services: []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: "127.0.0.1:9000", Peers: []string{"client-1"}}}}
+	if _, err := resolveService(cfg, "client-2", "tcp", "echo"); err == nil {
 		t.Fatal("expected peer to be rejected")
 	}
 }
 
-func TestAuthorizeTCPTargetIgnoresListedUDPTarget(t *testing.T) {
-	cfg := &config.Config{AllowedTargets: []config.AllowedTargetConfig{{Protocol: "udp", Address: "127.0.0.1:9000"}}}
-	if err := authorizeTCPTarget(cfg, "client-1", "127.0.0.1:9000"); err == nil {
-		t.Fatal("expected tcp target to be rejected when only udp target is listed")
-	}
-}
-
-func TestAuthorizeTCPTargetRejectsUnlistedTarget(t *testing.T) {
-	cfg := &config.Config{AllowedTargets: []config.AllowedTargetConfig{{Protocol: "tcp", Address: "127.0.0.1:9000"}}}
-	if err := authorizeTCPTarget(cfg, "client-1", "127.0.0.1:9001"); err == nil {
-		t.Fatal("expected target to be rejected")
+func TestResolveServiceRejectsMissingService(t *testing.T) {
+	cfg := &config.Config{Services: []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: "127.0.0.1:9000"}}}
+	if _, err := resolveService(cfg, "client-1", "tcp", "missing"); err == nil {
+		t.Fatal("expected missing service to be rejected")
 	}
 }

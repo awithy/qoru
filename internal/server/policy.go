@@ -6,30 +6,20 @@ import (
 	"github.com/awithy/qoru/internal/config"
 )
 
-func isTCPTargetAllowed(cfg *config.Config, peerID, target string) bool {
-	if len(cfg.AllowedTargets) == 0 {
-		return true
-	}
-
-	for _, allowed := range cfg.AllowedTargets {
-		if allowed.Protocol != "tcp" || target != allowed.Address {
+func resolveService(cfg *config.Config, peerID, protocol, service string) (config.ServiceConfig, error) {
+	for _, svc := range cfg.Services {
+		if svc.Protocol != protocol || svc.Name != service {
 			continue
 		}
-		if len(allowed.Peers) == 0 {
-			return true
+		if len(svc.Peers) == 0 {
+			return svc, nil
 		}
-		for _, peer := range allowed.Peers {
+		for _, peer := range svc.Peers {
 			if peerID == peer {
-				return true
+				return svc, nil
 			}
 		}
+		return config.ServiceConfig{}, fmt.Errorf("peer %q is not allowed to access %s service %q", peerID, protocol, service)
 	}
-	return false
-}
-
-func authorizeTCPTarget(cfg *config.Config, peerID, target string) error {
-	if isTCPTargetAllowed(cfg, peerID, target) {
-		return nil
-	}
-	return fmt.Errorf("peer %q is not allowed to access tcp target %q", peerID, target)
+	return config.ServiceConfig{}, fmt.Errorf("%s service %q not found", protocol, service)
 }

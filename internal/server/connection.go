@@ -52,7 +52,7 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 	}
 
 	if logger != nil {
-		logger.Info("connect requested", "peer_id", peerID, "protocol", req.Protocol, "target", req.Target)
+		logger.Info("connect requested", "peer_id", peerID, "protocol", req.Protocol, "service", req.Service, "egress", req.Egress)
 	}
 	if opts.connectRequest != nil {
 		opts.connectRequest(req)
@@ -61,26 +61,37 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 	if req.Protocol != "tcp" {
 		err := fmt.Errorf("unsupported connect protocol %q", req.Protocol)
 		if logger != nil {
-			logger.Warn("connect protocol unsupported", "peer_id", peerID, "protocol", req.Protocol, "target", req.Target, "error", err)
+			logger.Warn("connect protocol unsupported", "peer_id", peerID, "protocol", req.Protocol, "service", req.Service, "error", err)
 		}
 		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Message: err.Error()})
 		_ = stream.Close()
 		return
 	}
 
-	if err := authorizeTCPTarget(cfg, peerID, req.Target); err != nil {
+	if req.Egress != "" && req.Egress != cfg.NodeID {
+		err := fmt.Errorf("egress %q is not reachable from one-hop server %q", req.Egress, cfg.NodeID)
 		if logger != nil {
-			logger.Warn("tcp target denied", "peer_id", peerID, "target", req.Target, "error", err)
+			logger.Warn("egress unsupported", "peer_id", peerID, "egress", req.Egress, "error", err)
 		}
 		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Message: err.Error()})
 		_ = stream.Close()
 		return
 	}
 
-	targetConn, err := dialTCP(ctx, req.Target)
+	svc, err := resolveService(cfg, peerID, req.Protocol, req.Service)
 	if err != nil {
 		if logger != nil {
-			logger.Error("tcp target dial failed", "peer_id", peerID, "target", req.Target, "error", err)
+			logger.Warn("service denied", "peer_id", peerID, "protocol", req.Protocol, "service", req.Service, "error", err)
+		}
+		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Message: err.Error()})
+		_ = stream.Close()
+		return
+	}
+
+	targetConn, err := dialTCP(ctx, svc.Target)
+	if err != nil {
+		if logger != nil {
+			logger.Error("tcp target dial failed", "peer_id", peerID, "service", svc.Name, "target", svc.Target, "error", err)
 		}
 		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Message: err.Error()})
 		_ = stream.Close()
@@ -90,14 +101,14 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 
 	if err := protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: true}); err != nil {
 		if logger != nil {
-			logger.Error("write connect tcp response failed", "peer_id", peerID, "target", req.Target, "error", err)
+			logger.Error("write connect tcp response failed", "peer_id", peerID, "service", svc.Name, "target", svc.Target, "error", err)
 		}
 		_ = stream.Close()
 		return
 	}
 
 	if logger != nil {
-		logger.Info("tcp target connected", "peer_id", peerID, "target", req.Target)
+		logger.Info("tcp target connected", "peer_id", peerID, "service", svc.Name, "target", svc.Target)
 	}
 
 	proxyTCP(stream, targetConn)

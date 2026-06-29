@@ -20,8 +20,10 @@ func TestRunListensAndProxiesLocalTCP(t *testing.T) {
 	defer serverCancel()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	addr, serverErr := startTestServer(t, serverCtx, logger, nil)
 	targetListener := startEchoTCPServer(t)
+	serverCfg := testServerConfig()
+	serverCfg.Services = []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: targetListener.Addr().String(), Peers: []string{"client-1"}}}
+	addr, serverErr := startTestServerWithConfig(t, serverCtx, logger, serverCfg, nil)
 
 	clientCtx, clientCancel := context.WithCancel(context.Background())
 	defer clientCancel()
@@ -77,16 +79,21 @@ func TestRunListensOnMultipleForwards(t *testing.T) {
 	defer serverCancel()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	addr, serverErr := startTestServer(t, serverCtx, logger, nil)
 	targetA := startEchoTCPServer(t)
 	targetB := startEchoTCPServer(t)
+	serverCfg := testServerConfig()
+	serverCfg.Services = []config.ServiceConfig{
+		{Name: "echo-a", Protocol: "tcp", Target: targetA.Addr().String(), Peers: []string{"client-1"}},
+		{Name: "echo-b", Protocol: "tcp", Target: targetB.Addr().String(), Peers: []string{"client-1"}},
+	}
+	addr, serverErr := startTestServerWithConfig(t, serverCtx, logger, serverCfg, nil)
 
 	clientCtx, clientCancel := context.WithCancel(context.Background())
 	defer clientCancel()
 	clientCfg := testClientConfig(addr, targetA.Addr().String())
 	clientCfg.Forwards = []config.ForwardConfig{
-		{Protocol: "tcp", Listen: "127.0.0.1:0", Target: targetA.Addr().String()},
-		{Protocol: "tcp", Listen: "127.0.0.1:0", Target: targetB.Addr().String()},
+		{Protocol: "tcp", Listen: "127.0.0.1:0", Service: "echo-a"},
+		{Protocol: "tcp", Listen: "127.0.0.1:0", Service: "echo-b"},
 	}
 
 	started := make(chan string, 2)
@@ -118,9 +125,14 @@ func TestMultipleStreamsOnOneQUICConnection(t *testing.T) {
 	defer cancel()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	addr, serverErr := startTestServer(t, ctx, logger, nil)
 	targetA := startEchoTCPServer(t)
 	targetB := startEchoTCPServer(t)
+	serverCfg := testServerConfig()
+	serverCfg.Services = []config.ServiceConfig{
+		{Name: "echo-a", Protocol: "tcp", Target: targetA.Addr().String(), Peers: []string{"client-1"}},
+		{Name: "echo-b", Protocol: "tcp", Target: targetB.Addr().String(), Peers: []string{"client-1"}},
+	}
+	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, nil)
 	clientCfg := testClientConfig(addr, targetA.Addr().String())
 
 	conn, err := Connect(ctx, clientCfg, logger)
@@ -129,11 +141,11 @@ func TestMultipleStreamsOnOneQUICConnection(t *testing.T) {
 	}
 	defer conn.CloseWithError(0, "done")
 
-	streamA, err := OpenTCPStream(ctx, conn, targetA.Addr().String())
+	streamA, err := OpenTCPStream(ctx, conn, "echo-a", "")
 	if err != nil {
 		t.Fatalf("open stream A: %v", err)
 	}
-	streamB, err := OpenTCPStream(ctx, conn, targetB.Addr().String())
+	streamB, err := OpenTCPStream(ctx, conn, "echo-b", "")
 	if err != nil {
 		t.Fatalf("open stream B: %v", err)
 	}
@@ -149,7 +161,9 @@ func TestOpenTCPStreamReturnsTargetDialError(t *testing.T) {
 	defer cancel()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	addr, serverErr := startTestServer(t, ctx, logger, nil)
+	serverCfg := testServerConfig()
+	serverCfg.Services = []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: "127.0.0.1:1", Peers: []string{"client-1"}}}
+	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, nil)
 	clientCfg := testClientConfig(addr, "127.0.0.1:1")
 
 	conn, err := Connect(ctx, clientCfg, logger)
@@ -158,7 +172,7 @@ func TestOpenTCPStreamReturnsTargetDialError(t *testing.T) {
 	}
 	defer conn.CloseWithError(0, "done")
 
-	_, err = OpenTCPStream(ctx, conn, "localhost")
+	_, err = OpenTCPStream(ctx, conn, "echo", "")
 	if err == nil {
 		t.Fatal("expected target dial error")
 	}
@@ -175,7 +189,7 @@ func TestOpenTCPStreamReturnsTargetPolicyError(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	serverCfg := testServerConfig()
-	serverCfg.AllowedTargets = []config.AllowedTargetConfig{{Protocol: "tcp", Address: "127.0.0.1:9000"}}
+	serverCfg.Services = []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: "127.0.0.1:9000", Peers: []string{"client-2"}}}
 	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, nil)
 	clientCfg := testClientConfig(addr, "127.0.0.1:9001")
 
@@ -185,7 +199,7 @@ func TestOpenTCPStreamReturnsTargetPolicyError(t *testing.T) {
 	}
 	defer conn.CloseWithError(0, "done")
 
-	_, err = OpenTCPStream(ctx, conn, "127.0.0.1:9001")
+	_, err = OpenTCPStream(ctx, conn, "echo", "")
 	if err == nil {
 		t.Fatal("expected target policy error")
 	}
@@ -202,11 +216,13 @@ func TestConnectTCPProxiesBytesToTarget(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	received := make(chan protocol.ConnectRequest, 1)
-	addr, serverErr := startTestServer(t, ctx, logger, func(req protocol.ConnectRequest) { received <- req })
 	targetListener := startEchoTCPServer(t)
+	serverCfg := testServerConfig()
+	serverCfg.Services = []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: targetListener.Addr().String(), Peers: []string{"client-1"}}}
+	addr, serverErr := startTestServerWithConfig(t, ctx, logger, serverCfg, func(req protocol.ConnectRequest) { received <- req })
 
 	clientCfg := testClientConfig(addr, targetListener.Addr().String())
-	conn, stream, err := ConnectTCP(ctx, clientCfg, targetListener.Addr().String(), logger)
+	conn, stream, err := ConnectTCP(ctx, clientCfg, "echo", "", logger)
 	if err != nil {
 		t.Fatalf("expected client to connect: %v", err)
 	}
@@ -229,8 +245,8 @@ func TestConnectTCPProxiesBytesToTarget(t *testing.T) {
 		if req.Protocol != "tcp" {
 			t.Fatalf("expected protocol tcp, got %q", req.Protocol)
 		}
-		if req.Target != targetListener.Addr().String() {
-			t.Fatalf("expected target %q, got %q", targetListener.Addr().String(), req.Target)
+		if req.Service != "echo" {
+			t.Fatalf("expected service echo, got %q", req.Service)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for server to receive connect request")
@@ -352,7 +368,7 @@ func testClientConfig(serverAddr, targetAddr string) *config.Config {
 		Forwards: []config.ForwardConfig{{
 			Protocol: "tcp",
 			Listen:   "127.0.0.1:15432",
-			Target:   targetAddr,
+			Service:  "echo",
 		}},
 	}
 }

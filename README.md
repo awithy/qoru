@@ -20,12 +20,23 @@ TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
 - One QUIC connection shared by client-side TCP forwards.
 - One QUIC stream per proxied TCP connection.
 - Multiple local TCP forwards.
+- Named TCP services on the server.
+- Per-service peer authorization.
+- Optional one-hop egress selection.
 - Server-side TCP target dialing and byte proxying.
-- Optional server-side TCP target allowlist.
+- SPIFFE-style URI SAN node identities in mTLS certificates.
 - Development certificate generation.
-- Local echo-server demo.
+- Local echo-server demo and automated e2e smoke test.
 
 ## Quick Start: Local Demo
+
+Run the automated local smoke test:
+
+```sh
+make demo-e2e
+```
+
+Or run the demo manually.
 
 Generate development certificates:
 
@@ -115,7 +126,8 @@ server:
 forwards:
   - protocol: tcp
     listen: 127.0.0.1:15432
-    target: 127.0.0.1:9000
+    service: echo
+    egress: server-1
 ```
 
 Server:
@@ -131,10 +143,10 @@ identity:
 
 listen: 127.0.0.1:4433
 
-# Optional. If omitted or empty, any syntactically valid TCP target is allowed.
-allowed_targets:
-  - protocol: tcp
-    address: 127.0.0.1:9000
+services:
+  - name: echo
+    protocol: tcp
+    target: 127.0.0.1:9000
     peers:
       - client-1
 ```
@@ -156,16 +168,21 @@ For the current one-hop path:
 qoru client ==QUIC/mTLS== qoru server
 ```
 
-mTLS uses certificates signed by the configured CA. The system trust store is not used.
+mTLS uses certificates signed by the configured CA. The system trust store is not used. qoru node identity is taken from SPIFFE-style URI SANs such as:
+
+```text
+spiffe://qoru/node/client-1
+spiffe://qoru/node/server-1
+```
 
 ## Roadmap
 
 Near-term:
 
 - Improve active connection shutdown behavior.
-- Add clearer target dial failure behavior for local TCP clients.
-- Add per-peer/per-client target access policy.
+- Improve service dial failure behavior for local TCP clients.
 - Add more robust reconnect behavior for client/server QUIC sessions.
+- Add richer service selection semantics for future multi-egress/load-balanced service routing.
 
 Longer-term:
 
