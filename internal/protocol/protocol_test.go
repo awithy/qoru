@@ -25,6 +25,40 @@ func TestConnectTCPRequestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestConnectTCPResponseRoundTripOK(t *testing.T) {
+	var buf bytes.Buffer
+	want := ConnectTCPResponse{OK: true}
+
+	if err := WriteConnectTCPResponse(&buf, want); err != nil {
+		t.Fatalf("WriteConnectTCPResponse returned error: %v", err)
+	}
+
+	got, err := ReadConnectTCPResponse(&buf)
+	if err != nil {
+		t.Fatalf("ReadConnectTCPResponse returned error: %v", err)
+	}
+	if got != want {
+		t.Fatalf("expected %#v, got %#v", want, got)
+	}
+}
+
+func TestConnectTCPResponseRoundTripError(t *testing.T) {
+	var buf bytes.Buffer
+	want := ConnectTCPResponse{OK: false, Message: "dial failed"}
+
+	if err := WriteConnectTCPResponse(&buf, want); err != nil {
+		t.Fatalf("WriteConnectTCPResponse returned error: %v", err)
+	}
+
+	got, err := ReadConnectTCPResponse(&buf)
+	if err != nil {
+		t.Fatalf("ReadConnectTCPResponse returned error: %v", err)
+	}
+	if got != want {
+		t.Fatalf("expected %#v, got %#v", want, got)
+	}
+}
+
 func TestWriteConnectTCPRequestRejectsEmptyTarget(t *testing.T) {
 	if err := WriteConnectTCPRequest(io.Discard, ConnectTCPRequest{}); err == nil {
 		t.Fatal("expected empty target to be rejected")
@@ -88,6 +122,18 @@ func TestReadConnectTCPRequestRejectsMalformedPayload(t *testing.T) {
 	}
 
 	_, err := ReadConnectTCPRequest(&buf)
+	if err == nil {
+		t.Fatal("expected malformed payload error")
+	}
+}
+
+func TestReadConnectTCPResponseRejectsMalformedPayload(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteFrame(&buf, TypeConnectTCPResponse, []byte{ConnectStatusError, 0, 4, 'n'}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ReadConnectTCPResponse(&buf)
 	if err == nil {
 		t.Fatal("expected malformed payload error")
 	}

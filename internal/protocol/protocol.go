@@ -15,7 +15,13 @@ const (
 type MessageType uint8
 
 const (
-	TypeConnectTCP MessageType = 1
+	TypeConnectTCP         MessageType = 1
+	TypeConnectTCPResponse MessageType = 2
+)
+
+const (
+	ConnectStatusOK    uint8 = 0
+	ConnectStatusError uint8 = 1
 )
 
 type Frame struct {
@@ -26,6 +32,11 @@ type Frame struct {
 
 type ConnectTCPRequest struct {
 	Target string
+}
+
+type ConnectTCPResponse struct {
+	OK      bool
+	Message string
 }
 
 func WriteFrame(w io.Writer, typ MessageType, payload []byte) error {
@@ -108,4 +119,48 @@ func ReadConnectTCPRequest(r io.Reader) (ConnectTCPRequest, error) {
 	}
 
 	return ConnectTCPRequest{Target: string(frame.Payload[2:])}, nil
+}
+
+func WriteConnectTCPResponse(w io.Writer, resp ConnectTCPResponse) error {
+	status := ConnectStatusOK
+	if !resp.OK {
+		status = ConnectStatusError
+	}
+	if len(resp.Message) > MaxPayloadSize-3 {
+		return fmt.Errorf("message too long: %d > %d", len(resp.Message), MaxPayloadSize-3)
+	}
+
+	payload := make([]byte, 3+len(resp.Message))
+	payload[0] = status
+	binary.BigEndian.PutUint16(payload[1:3], uint16(len(resp.Message)))
+	copy(payload[3:], resp.Message)
+	return WriteFrame(w, TypeConnectTCPResponse, payload)
+}
+
+func ReadConnectTCPResponse(r io.Reader) (ConnectTCPResponse, error) {
+	frame, err := ReadFrame(r)
+	if err != nil {
+		return ConnectTCPResponse{}, err
+	}
+	if frame.Type != TypeConnectTCPResponse {
+		return ConnectTCPResponse{}, fmt.Errorf("unexpected message type %d", frame.Type)
+	}
+	if len(frame.Payload) < 3 {
+		return ConnectTCPResponse{}, fmt.Errorf("malformed connect tcp response payload")
+	}
+
+	status := frame.Payload[0]
+	messageLen := int(binary.BigEndian.Uint16(frame.Payload[1:3]))
+	if len(frame.Payload[3:]) != messageLen {
+		return ConnectTCPResponse{}, fmt.Errorf("malformed connect tcp response payload: message length mismatch")
+	}
+
+	switch status {
+	case ConnectStatusOK:
+		return ConnectTCPResponse{OK: true, Message: string(frame.Payload[3:])}, nil
+	case ConnectStatusError:
+		return ConnectTCPResponse{OK: false, Message: string(frame.Payload[3:])}, nil
+	default:
+		return ConnectTCPResponse{}, fmt.Errorf("unknown connect tcp response status %d", status)
+	}
 }

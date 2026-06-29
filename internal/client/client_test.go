@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,6 +140,31 @@ func TestMultipleStreamsOnOneQUICConnection(t *testing.T) {
 
 	assertStreamEcho(t, streamA, "aaaa")
 	assertStreamEcho(t, streamB, "bbbb")
+
+	cancelAndWaitForServer(t, cancel, serverErr)
+}
+
+func TestOpenTCPStreamReturnsTargetDialError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	addr, serverErr := startTestServer(t, ctx, logger, nil)
+	clientCfg := testClientConfig(addr, "localhost")
+
+	conn, err := Connect(ctx, clientCfg, logger)
+	if err != nil {
+		t.Fatalf("expected client to connect: %v", err)
+	}
+	defer conn.CloseWithError(0, "done")
+
+	_, err = OpenTCPStream(ctx, conn, "localhost")
+	if err == nil {
+		t.Fatal("expected target dial error")
+	}
+	if !strings.Contains(err.Error(), "connect tcp failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	cancelAndWaitForServer(t, cancel, serverErr)
 }

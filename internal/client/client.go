@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"time"
@@ -157,6 +158,19 @@ func OpenTCPStream(ctx context.Context, conn *quic.Conn, target string) (*quic.S
 	if err := protocol.WriteConnectTCPRequest(stream, protocol.ConnectTCPRequest{Target: target}); err != nil {
 		_ = stream.Close()
 		return nil, err
+	}
+
+	resp, err := protocol.ReadConnectTCPResponse(stream)
+	if err != nil {
+		_ = stream.Close()
+		return nil, err
+	}
+	if !resp.OK {
+		_ = stream.Close()
+		if resp.Message == "" {
+			return nil, fmt.Errorf("connect tcp failed")
+		}
+		return nil, fmt.Errorf("connect tcp failed: %s", resp.Message)
 	}
 
 	return stream, nil

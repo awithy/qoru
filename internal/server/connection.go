@@ -48,10 +48,19 @@ func handleStream(ctx context.Context, stream *quic.Stream, logger *slog.Logger,
 		if logger != nil {
 			logger.Error("tcp target dial failed", "target", req.Target, "error", err)
 		}
+		_ = protocol.WriteConnectTCPResponse(stream, protocol.ConnectTCPResponse{OK: false, Message: err.Error()})
 		_ = stream.Close()
 		return
 	}
 	defer targetConn.Close()
+
+	if err := protocol.WriteConnectTCPResponse(stream, protocol.ConnectTCPResponse{OK: true}); err != nil {
+		if logger != nil {
+			logger.Error("write connect tcp response failed", "target", req.Target, "error", err)
+		}
+		_ = stream.Close()
+		return
+	}
 
 	if logger != nil {
 		logger.Info("tcp target connected", "target", req.Target)
