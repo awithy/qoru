@@ -32,7 +32,6 @@ Implemented today:
 
 Not implemented yet:
 
-- peer identity extraction/logging beyond TLS verification
 - per-peer/per-client target access policy
 - reconnect behavior if the shared QUIC connection dies
 - multi-hop forwarding
@@ -404,8 +403,7 @@ docs/                  design documentation
 
 1. Improve active connection shutdown and goroutine lifecycle tracking.
 2. Add clearer local TCP behavior when target setup fails.
-3. Extract/log authenticated peer identities from certificates.
-4. Add per-client target access policy.
+3. Add per-client target access policy.
 5. Add reconnect behavior for the shared client QUIC connection.
 6. Consider configurable log level/log format and timeout settings.
 7. Later: multi-hop forwarding and end-to-end encrypted payload frames.

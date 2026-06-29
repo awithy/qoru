@@ -162,7 +162,6 @@ Near-term:
 
 - Improve active connection shutdown behavior.
 - Add clearer target dial failure behavior for local TCP clients.
-- Extract/log authenticated peer identities from certificates.
 - Add per-peer/per-client target access policy.
 - Add more robust reconnect behavior for client/server QUIC sessions.
 
