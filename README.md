@@ -178,7 +178,6 @@ Longer-term:
 ```text
 docs/design.md
 docs/local-demo.md
-docs/handoff.md
 docs/design-discussion1.md
 ```
 
