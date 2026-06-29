@@ -89,6 +89,70 @@ Loads config, validates it according to its `mode`, prints normalized YAML to st
 
 `print-config` writes directly to stdout and does not emit runtime logs.
 
+## End-State Routing Model
+
+The long-term routing model is service-first with optional client-side routing constraints.
+
+A local forward primarily identifies the service the client wants:
+
+```yaml
+forwards:
+  - protocol: tcp
+    listen: 127.0.0.1:15432
+    service: postgres-prod
+```
+
+In this mode, qoru may eventually choose an eligible egress node and route automatically. This enables service-level load balancing, failover, and topology-aware routing when multiple egress nodes can provide the same service.
+
+A client may also constrain the egress node while still allowing qoru to choose the path to that egress:
+
+```yaml
+forwards:
+  - protocol: tcp
+    listen: 127.0.0.1:15432
+    service: postgres-prod
+    egress: relay-b
+```
+
+In this mode, `egress` means "the service must exit at this node." It is a routing constraint, not the service identity itself.
+
+For multi-hop topologies, a client may eventually specify an explicit route:
+
+```yaml
+forwards:
+  - protocol: tcp
+    listen: 127.0.0.1:15432
+    service: postgres-prod
+    route:
+      - relay-a
+      - relay-b
+```
+
+If both `route` and `egress` are specified, the final route hop must match the requested egress:
+
+```yaml
+forwards:
+  - protocol: tcp
+    listen: 127.0.0.1:15432
+    service: postgres-prod
+    egress: relay-b
+    route:
+      - relay-a
+      - relay-b
+```
+
+Conceptually:
+
+- `service` is what the client wants.
+- `egress` optionally constrains where traffic must exit.
+- `route` optionally constrains the exact hop sequence.
+- if neither `egress` nor `route` is set, qoru may choose automatically.
+- if `route` is set, the last hop is the egress node.
+- if both `route` and `egress` are set, they must agree.
+- authorization policy can still reject any automatic or explicit routing decision.
+
+This model supports both automatic routing and client-specified routing without making either one mandatory. The current implementation is intentionally narrower: service names are resolved on the selected direct upstream server, and with multiple configured upstream servers the client must set `egress` explicitly.
+
 ## Configuration
 
 The current config format is YAML.
