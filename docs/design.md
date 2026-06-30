@@ -558,12 +558,19 @@ Automated smoke tests are available:
 ```sh
 make demo-e2e
 make demo-multihop
+make demo-threehop
 ```
 
 `demo-multihop` exercises:
 
 ```text
 local TCP client -> qoru client -> relay-a -> relay-b -> echo target
+```
+
+`demo-threehop` exercises the current maximum explicit route length:
+
+```text
+local TCP client -> qoru client -> relay-a -> relay-b -> relay-c -> echo target
 ```
 
 See `docs/local-demo.md` for details.

@@ -39,6 +39,7 @@ Run the automated local smoke tests:
 ```sh
 make demo-e2e
 make demo-multihop
+make demo-threehop
 ```
 
 Or run the demo manually.
@@ -238,8 +239,11 @@ Example multi-hop configs:
 
 ```text
 examples/config/client-multihop.yaml
+examples/config/client-threehop.yaml
 examples/config/relay-a.yaml
 examples/config/relay-b.yaml
+examples/config/relay-b-threehop.yaml
+examples/config/relay-c.yaml
 ```
 
 Server/relay configs use `peers` for relay neighbors; client configs use `servers` for direct upstream entry points. Today, only the relay that initiates a relay-to-relay connection needs a `peers` entry with `address` and `dial: true`. The target model is that both sides may define each other as peers, with `dial` controlling which side initiates versus only accepting inbound sessions.
