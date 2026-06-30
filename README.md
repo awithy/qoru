@@ -4,10 +4,11 @@
 
 The long-term goal is to create a small authenticated relay overlay where clients and relay nodes can forward traffic across one or more hops while preserving end-to-end payload confidentiality from intermediary relays.
 
-The current implementation supports a basic one-hop TCP proxy:
+The current implementation supports TCP forwarding over QUIC/mTLS, including direct one-hop forwarding and explicit-route multi-hop forwarding through configured relay peers:
 
 ```text
 TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
+TCP client -> qoru client -> relay-a -> relay-b -> TCP target
 ```
 
 ## Current Features
@@ -30,7 +31,7 @@ TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
 - Server-side TCP target dialing and byte proxying.
 - SPIFFE-style URI SAN node identities in mTLS certificates.
 - Development certificate generation.
-- Local echo-server demo and automated e2e smoke test.
+- Local echo-server demos and automated one-hop, two-hop, and three-hop smoke tests.
 
 ## Quick Start: Local Demo
 
@@ -42,7 +43,7 @@ make demo-multihop
 make demo-threehop
 ```
 
-Or run the demo manually.
+Or run the one-hop demo manually.
 
 Generate development certificates:
 
@@ -149,9 +150,9 @@ forwards:
       - relay-b
 ```
 
-Explicit multi-hop routing currently uses hop-by-hop QUIC/mTLS. End-to-end payload encryption through intermediary relays is not implemented yet.
+Explicit multi-hop routing currently supports routes up to three relay hops and uses hop-by-hop QUIC/mTLS. End-to-end payload encryption through intermediary relays is not implemented yet.
 
-A client can configure multiple direct upstream servers. In that case each forward must set `egress` to a configured server ID:
+A client can configure multiple direct upstream servers. Without an explicit `route`, each forward must set `egress` to a configured server ID:
 
 ```yaml
 servers:
@@ -161,7 +162,7 @@ servers:
     address: 127.0.0.1:4434
 ```
 
-Server:
+One-hop server:
 
 ```yaml
 node_id: server-1
@@ -182,6 +183,32 @@ services:
       - client-1
 ```
 
+Relay peer config for explicit multi-hop forwarding:
+
+```yaml
+node_id: relay-a
+mode: server
+
+identity:
+  cert: ./dev/certs/relay-a.crt
+  key: ./dev/certs/relay-a.key
+  ca: ./dev/certs/ca.crt
+
+listen: 127.0.0.1:4433
+
+peers:
+  - id: relay-b
+    address: 127.0.0.1:4434
+    dial: true
+```
+
+The next-hop relay can list the initiating peer without dialing back:
+
+```yaml
+peers:
+  - id: relay-a
+```
+
 ## Security Model
 
 `qoru` is intended to use two security layers:
@@ -197,10 +224,10 @@ If the client-side upstream QUIC connection is lost, active proxied TCP connecti
 
 Server QUIC listener accept failures are retried with exponential backoff starting at `100ms`, capped at `30s`, and reset after a successful accept.
 
-For the current one-hop path:
+For every direct peer path, including each hop in a multi-hop route:
 
 ```text
-qoru client ==QUIC/mTLS== qoru server
+qoru node ==QUIC/mTLS== qoru node
 ```
 
 mTLS uses certificates signed by the configured CA. The system trust store is not used. qoru node identity is taken from SPIFFE-style URI SANs such as:
@@ -218,16 +245,15 @@ Near-term:
 - Improve service dial failure behavior for local TCP clients.
 - Add better reconnect observability and clearer server-side session handling.
 - Improve duplicate peer-session diagnostics and validation where possible.
-- Improve automated explicit-route multi-hop smoke testing and demo config.
 - Add richer service selection semantics for future multi-egress/load-balanced service routing.
+- Improve peer/session reconnect behavior and operational observability.
 
 Longer-term:
 
-- Direction-independent peer sessions across the full overlay.
 - End-to-end encrypted payload frames.
 - UDP support.
 - Topology/status commands.
-- Direction-independent peer sessions.
+- More complete direction-independent peer/session behavior.
 
 ## Documentation
 
@@ -252,4 +278,4 @@ Server/relay configs use `peers` for relay neighbors; client configs use `server
 
 ## Status
 
-Experimental. The current code supports a basic local one-hop TCP proxy over QUIC/mTLS. APIs, config, and protocol details are expected to change.
+Experimental. The current code supports one-hop and explicit-route multi-hop TCP forwarding over QUIC/mTLS. APIs, config, and protocol details are expected to change.
