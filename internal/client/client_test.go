@@ -86,6 +86,9 @@ func TestRunProxiesExplicitMultiHopRoute(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	targetListener := startEchoTCPServer(t)
 
+	requestedAtRelay := make(chan protocol.ConnectRequest, 1)
+	requestedAtEgress := make(chan protocol.ConnectRequest, 1)
+
 	egressCfg := &config.Config{
 		NodeID:   "relay-b",
 		Mode:     config.ModeServer,
@@ -93,7 +96,7 @@ func TestRunProxiesExplicitMultiHopRoute(t *testing.T) {
 		Listen:   "127.0.0.1:0",
 		Services: []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: targetListener.Addr().String(), Peers: []string{"relay-a"}}},
 	}
-	egressAddr, egressErr := startTestServerWithConfig(t, ctx, logger, egressCfg, nil)
+	egressAddr, egressErr := startTestServerWithConfig(t, ctx, logger, egressCfg, func(req protocol.ConnectRequest) { requestedAtEgress <- req })
 
 	relayCfg := &config.Config{
 		NodeID:   "relay-a",
@@ -102,7 +105,7 @@ func TestRunProxiesExplicitMultiHopRoute(t *testing.T) {
 		Listen:   "127.0.0.1:0",
 		Peers:    []config.PeerConfig{{ID: "relay-b", Address: egressAddr, Dial: true}},
 	}
-	relayAddr, relayErr := startTestServerWithConfig(t, ctx, logger, relayCfg, nil)
+	relayAddr, relayErr := startTestServerWithConfig(t, ctx, logger, relayCfg, func(req protocol.ConnectRequest) { requestedAtRelay <- req })
 
 	clientCtx, clientCancel := context.WithCancel(context.Background())
 	defer clientCancel()
@@ -120,6 +123,15 @@ func TestRunProxiesExplicitMultiHopRoute(t *testing.T) {
 
 	clientAddr := waitForClientAddr(t, clientStarted, clientErr)
 	assertEcho(t, clientAddr, "hop!")
+
+	relayReq := waitForConnectRequest(t, requestedAtRelay)
+	egressReq := waitForConnectRequest(t, requestedAtEgress)
+	if relayReq.RequestID == "" {
+		t.Fatal("expected relay request id to be set")
+	}
+	if egressReq.RequestID != relayReq.RequestID {
+		t.Fatalf("expected request id to be forwarded unchanged, relay=%q egress=%q", relayReq.RequestID, egressReq.RequestID)
+	}
 
 	clientCancel()
 	select {
@@ -506,19 +518,29 @@ func TestOpenTCPStreamProxiesBytesToTarget(t *testing.T) {
 		t.Fatalf("expected echo %q, got %q", "ping", string(buf))
 	}
 
-	select {
-	case req := <-received:
-		if req.Protocol != "tcp" {
-			t.Fatalf("expected protocol tcp, got %q", req.Protocol)
-		}
-		if req.Service != "echo" {
-			t.Fatalf("expected service echo, got %q", req.Service)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for server to receive connect request")
+	req := waitForConnectRequest(t, received)
+	if req.RequestID != "018ff6f2-5c7b-7d4a-b7f1-9c0e6e7a1234" {
+		t.Fatalf("expected request id to be forwarded, got %q", req.RequestID)
+	}
+	if req.Protocol != "tcp" {
+		t.Fatalf("expected protocol tcp, got %q", req.Protocol)
+	}
+	if req.Service != "echo" {
+		t.Fatalf("expected service echo, got %q", req.Service)
 	}
 
 	cancelAndWaitForServer(t, cancel, serverErr)
+}
+
+func waitForConnectRequest(t *testing.T, ch <-chan protocol.ConnectRequest) protocol.ConnectRequest {
+	t.Helper()
+	select {
+	case req := <-ch:
+		return req
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for connect request")
+		return protocol.ConnectRequest{}
+	}
 }
 
 func connectTestClient(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*quic.Conn, error) {
