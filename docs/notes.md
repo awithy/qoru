@@ -7,5 +7,6 @@
 - monitoring
 - docker deployment
 - egress/route tags
+- version command
 
 
