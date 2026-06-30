@@ -161,7 +161,7 @@ func handleLocalConnection(ctx context.Context, session upstreamSession, service
 		logger.Info("local tcp connection accepted")
 	}
 
-	stream, err := session.OpenTCPStream(ctx, service, egress, route)
+	stream, err := session.OpenTCPStream(ctx, requestID, service, egress, route)
 	if err != nil {
 		if logger != nil {
 			var rejected *ConnectRejectedError

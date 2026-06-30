@@ -17,7 +17,7 @@ TCP client -> qoru client -> relay-a -> relay-b -> TCP target
 - YAML configuration.
 - QUIC transport using `quic-go`.
 - mTLS peer authentication with a configured private CA.
-- Custom binary control protocol with machine-readable connect response codes.
+- Custom binary control protocol with UUIDv7 request IDs and machine-readable connect response codes.
 - One reconnecting upstream QUIC connection per configured client-side server.
 - Multiple direct upstream servers selected by forward `egress`.
 - On-demand upstream reconnect for new local TCP connections after a QUIC connection loss.

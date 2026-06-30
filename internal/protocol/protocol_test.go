@@ -8,9 +8,11 @@ import (
 	"testing"
 )
 
+const testRequestID = "018ff6f2-5c7b-7d4a-b7f1-9c0e6e7a1234"
+
 func TestConnectRequestRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
-	want := ConnectRequest{Protocol: "tcp", Service: "echo", Egress: "server-1", Route: []string{"server-1"}}
+	want := ConnectRequest{RequestID: testRequestID, Protocol: "tcp", Service: "echo", Egress: "server-1", Route: []string{"server-1"}}
 
 	if err := WriteConnectRequest(&buf, want); err != nil {
 		t.Fatalf("WriteConnectRequest returned error: %v", err)
@@ -20,7 +22,7 @@ func TestConnectRequestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadConnectRequest returned error: %v", err)
 	}
-	if got.Protocol != want.Protocol || got.Service != want.Service || got.Egress != want.Egress || strings.Join(got.Route, ",") != strings.Join(want.Route, ",") {
+	if got.RequestID != want.RequestID || got.Protocol != want.Protocol || got.Service != want.Service || got.Egress != want.Egress || strings.Join(got.Route, ",") != strings.Join(want.Route, ",") {
 		t.Fatalf("expected %#v, got %#v", want, got)
 	}
 }
@@ -60,20 +62,20 @@ func TestConnectResponseRoundTripError(t *testing.T) {
 }
 
 func TestWriteConnectRequestRejectsEmptyProtocol(t *testing.T) {
-	if err := WriteConnectRequest(io.Discard, ConnectRequest{Service: "echo"}); err == nil {
+	if err := WriteConnectRequest(io.Discard, ConnectRequest{RequestID: testRequestID, Service: "echo"}); err == nil {
 		t.Fatal("expected empty protocol to be rejected")
 	}
 }
 
 func TestWriteConnectRequestRejectsEmptyService(t *testing.T) {
-	if err := WriteConnectRequest(io.Discard, ConnectRequest{Protocol: "tcp"}); err == nil {
+	if err := WriteConnectRequest(io.Discard, ConnectRequest{RequestID: testRequestID, Protocol: "tcp"}); err == nil {
 		t.Fatal("expected empty service to be rejected")
 	}
 }
 
 func TestWriteConnectRequestRejectsTooLongService(t *testing.T) {
 	service := strings.Repeat("a", MaxTargetLength+1)
-	if err := WriteConnectRequest(io.Discard, ConnectRequest{Protocol: "tcp", Service: service}); err == nil {
+	if err := WriteConnectRequest(io.Discard, ConnectRequest{RequestID: testRequestID, Protocol: "tcp", Service: service}); err == nil {
 		t.Fatal("expected too-long service to be rejected")
 	}
 }

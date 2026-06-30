@@ -75,9 +75,10 @@ Loads and validates client config, establishes one QUIC/mTLS connection to each 
 For each local TCP connection:
 
 1. select an upstream by the forward's `egress` value, or the sole configured upstream when `egress` is empty
-2. open a new QUIC stream on the selected upstream connection
-3. send `ConnectRequest{Protocol: "tcp", Service: "...", Egress: "...", Route: [...]}`
-4. read `ConnectResponse`
+2. generate a UUIDv7 request ID
+3. open a new QUIC stream on the selected upstream connection
+4. send `ConnectRequest{RequestID: "...", Protocol: "tcp", Service: "...", Egress: "...", Route: [...]}`
+5. read `ConnectResponse`
 5. if OK, proxy bytes between the local TCP connection and QUIC stream
 
 ### `qoru server`
@@ -335,6 +336,7 @@ Sent by the client to ask the server to open a named service for a protocol. Cur
 Payload format:
 
 ```text
+request_id   [16]byte // UUIDv7
 protocol_len uint8
 protocol     []byte
 service_len  uint16 big endian
@@ -439,7 +441,7 @@ The current client runtime lives in `internal/client`.
 3. binds one local TCP listener per configured `forwards` entry
 4. starts accept loops for all listeners
 5. for each local TCP connection, selects an upstream session by forward `egress` and opens a new QUIC stream
-6. sends `ConnectRequest{Protocol: "tcp", Service: "...", Egress: "...", Route: [...]}`
+6. sends `ConnectRequest{RequestID: "...", Protocol: "tcp", Service: "...", Egress: "...", Route: [...]}`
 7. waits for `ConnectResponse`
 8. proxies bytes between the local TCP connection and QUIC stream
 9. exits cleanly when the context is canceled

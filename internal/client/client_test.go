@@ -362,11 +362,11 @@ func TestMultipleStreamsOnOneQUICConnection(t *testing.T) {
 	}
 	defer conn.CloseWithError(0, "done")
 
-	streamA, err := OpenTCPStream(ctx, conn, "echo-a", "", nil)
+	streamA, err := OpenTCPStream(ctx, conn, "018ff6f2-5c7b-7d4a-b7f1-9c0e6e7a0001", "echo-a", "", nil)
 	if err != nil {
 		t.Fatalf("open stream A: %v", err)
 	}
-	streamB, err := OpenTCPStream(ctx, conn, "echo-b", "", nil)
+	streamB, err := OpenTCPStream(ctx, conn, "018ff6f2-5c7b-7d4a-b7f1-9c0e6e7a0002", "echo-b", "", nil)
 	if err != nil {
 		t.Fatalf("open stream B: %v", err)
 	}
@@ -393,7 +393,7 @@ func TestOpenTCPStreamReturnsTargetDialError(t *testing.T) {
 	}
 	defer conn.CloseWithError(0, "done")
 
-	_, err = OpenTCPStream(ctx, conn, "echo", "", nil)
+	_, err = OpenTCPStream(ctx, conn, "018ff6f2-5c7b-7d4a-b7f1-9c0e6e7a1234", "echo", "", nil)
 	if err == nil {
 		t.Fatal("expected target dial error")
 	}
@@ -425,7 +425,7 @@ func TestOpenTCPStreamReturnsEgressError(t *testing.T) {
 	}
 	defer conn.CloseWithError(0, "done")
 
-	_, err = OpenTCPStream(ctx, conn, "echo", "server-2", nil)
+	_, err = OpenTCPStream(ctx, conn, "018ff6f2-5c7b-7d4a-b7f1-9c0e6e7a1234", "echo", "server-2", nil)
 	if err == nil {
 		t.Fatal("expected egress error")
 	}
@@ -456,7 +456,7 @@ func TestOpenTCPStreamReturnsTargetPolicyError(t *testing.T) {
 	}
 	defer conn.CloseWithError(0, "done")
 
-	_, err = OpenTCPStream(ctx, conn, "echo", "", nil)
+	_, err = OpenTCPStream(ctx, conn, "018ff6f2-5c7b-7d4a-b7f1-9c0e6e7a1234", "echo", "", nil)
 	if err == nil {
 		t.Fatal("expected target policy error")
 	}
@@ -489,7 +489,7 @@ func TestOpenTCPStreamProxiesBytesToTarget(t *testing.T) {
 	}
 	defer conn.CloseWithError(0, "done")
 
-	stream, err := OpenTCPStream(ctx, conn, "echo", "", nil)
+	stream, err := OpenTCPStream(ctx, conn, "018ff6f2-5c7b-7d4a-b7f1-9c0e6e7a1234", "echo", "", nil)
 	if err != nil {
 		t.Fatalf("open stream: %v", err)
 	}

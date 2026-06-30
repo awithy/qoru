@@ -3,13 +3,11 @@ package server
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/awithy/qoru/internal/identity"
 	"github.com/awithy/qoru/internal/protocol"
-	"github.com/awithy/qoru/internal/requestid"
 	"github.com/quic-go/quic-go"
 )
 
@@ -18,7 +16,9 @@ const defaultTCPDialTimeout = 10 * time.Second
 func (rt *serverRuntime) handleConnection(conn *quic.Conn) {
 	peerID, err := identity.PeerNodeID(conn.ConnectionState().TLS)
 	if err != nil {
-		rt.logger.Error("extract peer identity failed", "error", err)
+		if rt.logger != nil {
+			rt.logger.Error("extract peer identity failed", "error", err)
+		}
 		_ = conn.CloseWithError(1, "peer identity required")
 		return
 	}
@@ -26,75 +26,80 @@ func (rt *serverRuntime) handleConnection(conn *quic.Conn) {
 	if rt.peers != nil {
 		registeredPeer = rt.peers.RegisterInbound(peerID, conn)
 	}
-	if !registeredPeer {
-		rt.logger.Info("peer connected", "peer_id", peerID)
+	if rt.logger != nil {
+		if !registeredPeer {
+			rt.logger.Info("peer connected", "peer_id", peerID)
+		}
+		defer rt.logger.Info("peer disconnected", "peer_id", peerID)
 	}
-	defer rt.logger.Info("peer disconnected", "peer_id", peerID)
 
 	var streamWG sync.WaitGroup
 	for {
 		stream, err := conn.AcceptStream(rt.ctx)
 		if err != nil {
-			if rt.ctx.Err() == nil {
+			if rt.ctx.Err() == nil && rt.logger != nil {
 				rt.logger.Error("accept stream failed", "error", err)
 			}
 			_ = conn.CloseWithError(0, "done")
-			if waitErr := waitGroupTimeout(&streamWG, defaultShutdownWaitTimeout); waitErr != nil {
+			if waitErr := waitGroupTimeout(&streamWG, defaultShutdownWaitTimeout); waitErr != nil && rt.logger != nil {
 				rt.logger.Warn("timed out waiting for streams to close", "peer_id", peerID, "error", waitErr)
 			}
 			return
 		}
-		streamWG.Go(func() {
+		streamWG.Add(1)
+		go func() {
+			defer streamWG.Done()
 			rt.handleStream(peerID, stream)
-		})
+		}()
 	}
 }
 
 func (rt *serverRuntime) handleStream(peerID string, stream *quic.Stream) {
-	requestID, err := requestid.New()
-	if err != nil {
-		rt.logger.Error("generate request id failed", "peer_id", peerID, "error", err)
-		_ = stream.Close()
-		return
-	}
-	logger := rt.logger.With("request_id", requestID, "peer_id", peerID)
-
 	req, err := protocol.ReadConnectRequest(stream)
 	if err != nil {
-		logger.Error("read connect request failed", "error", err)
+		if rt.logger != nil {
+			rt.logger.Error("read connect request failed", "error", err)
+		}
 		_ = stream.Close()
 		return
 	}
 
-	logger = logger.With("protocol", req.Protocol, "service", req.Service, "egress", req.Egress, "route", req.Route)
-	logger.Info("connect requested")
+	if rt.logger != nil {
+		rt.logger.Info("connect requested", "peer_id", peerID, "protocol", req.Protocol, "service", req.Service, "egress", req.Egress)
+	}
 	if rt.opts.connectRequest != nil {
 		rt.opts.connectRequest(req)
 	}
 
 	if req.Protocol != "tcp" {
 		err := fmt.Errorf("unsupported connect protocol %q", req.Protocol)
-		logger.Warn("connect protocol unsupported", "response_code", protocol.ConnectCodeUnsupportedProtocol.String(), "error", err)
+		if rt.logger != nil {
+			rt.logger.Warn("connect protocol unsupported", "peer_id", peerID, "protocol", req.Protocol, "service", req.Service, "error", err)
+		}
 		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeUnsupportedProtocol, Message: err.Error()})
 		_ = stream.Close()
 		return
 	}
 
 	if err := validateConnectRoute(rt.cfg.NodeID, req.Route, req.Egress); err != nil {
-		logger.Warn("route invalid", "response_code", protocol.ConnectCodeRouteInvalid.String(), "error", err)
+		if rt.logger != nil {
+			rt.logger.Warn("route invalid", "peer_id", peerID, "route", req.Route, "egress", req.Egress, "error", err)
+		}
 		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeRouteInvalid, Message: err.Error()})
 		_ = stream.Close()
 		return
 	}
 
 	if len(req.Route) > 1 {
-		rt.handleRelayStream(logger, req, stream)
+		rt.handleRelayStream(peerID, req, stream)
 		return
 	}
 
 	if req.Egress != "" && req.Egress != rt.cfg.NodeID {
 		err := fmt.Errorf("egress %q is not reachable from one-hop server %q", req.Egress, rt.cfg.NodeID)
-		logger.Warn("egress unsupported", "response_code", protocol.ConnectCodeUnreachableEgress.String(), "error", err)
+		if rt.logger != nil {
+			rt.logger.Warn("egress unsupported", "peer_id", peerID, "egress", req.Egress, "error", err)
+		}
 		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeUnreachableEgress, Message: err.Error()})
 		_ = stream.Close()
 		return
@@ -102,16 +107,19 @@ func (rt *serverRuntime) handleStream(peerID string, stream *quic.Stream) {
 
 	svc, err := resolveService(rt.cfg, peerID, req.Protocol, req.Service)
 	if err != nil {
-		code := serviceErrorCode(err)
-		logger.Warn("service denied", "response_code", code.String(), "error", err)
-		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: code, Message: err.Error()})
+		if rt.logger != nil {
+			rt.logger.Warn("service denied", "peer_id", peerID, "protocol", req.Protocol, "service", req.Service, "error", err)
+		}
+		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: serviceErrorCode(err), Message: err.Error()})
 		_ = stream.Close()
 		return
 	}
 
 	targetConn, err := dialTCP(rt.ctx, svc.Target)
 	if err != nil {
-		logger.Error("tcp target dial failed", "target", svc.Target, "response_code", protocol.ConnectCodeTargetDialFailed.String(), "error", err)
+		if rt.logger != nil {
+			rt.logger.Error("tcp target dial failed", "peer_id", peerID, "service", svc.Name, "target", svc.Target, "error", err)
+		}
 		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeTargetDialFailed, Message: err.Error()})
 		_ = stream.Close()
 		return
@@ -119,24 +127,28 @@ func (rt *serverRuntime) handleStream(peerID string, stream *quic.Stream) {
 	defer targetConn.Close()
 
 	if err := protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: true}); err != nil {
-		logger.Error("write connect tcp response failed", "target", svc.Target, "error", err)
+		if rt.logger != nil {
+			rt.logger.Error("write connect tcp response failed", "peer_id", peerID, "service", svc.Name, "target", svc.Target, "error", err)
+		}
 		_ = stream.Close()
 		return
 	}
 
-	logger.Info("tcp target connected", "target", svc.Target)
+	if rt.logger != nil {
+		rt.logger.Info("tcp target connected", "peer_id", peerID, "service", svc.Name, "target", svc.Target)
+	}
 
 	proxyTCP(stream, targetConn)
 
-	logger.Info("tcp proxy closed", "target", svc.Target)
+	if rt.logger != nil {
+		rt.logger.Info("tcp proxy closed", "peer_id", peerID, "service", svc.Name, "target", svc.Target)
+	}
 }
 
-func (rt *serverRuntime) handleRelayStream(logger *slog.Logger, req protocol.ConnectRequest, inbound *quic.Stream) {
+func (rt *serverRuntime) handleRelayStream(peerID string, req protocol.ConnectRequest, inbound *quic.Stream) {
 	nextHop := req.Route[1]
-	logger = logger.With("next_hop", nextHop)
 	if rt.peers == nil {
 		err := fmt.Errorf("peer sessions are not initialized")
-		logger.Error("peer sessions unavailable", "response_code", protocol.ConnectCodeInternalError.String(), "error", err)
 		_ = protocol.WriteConnectResponse(inbound, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeInternalError, Message: err.Error()})
 		_ = inbound.Close()
 		return
@@ -144,7 +156,6 @@ func (rt *serverRuntime) handleRelayStream(logger *slog.Logger, req protocol.Con
 
 	outbound, err := rt.peers.OpenStream(rt.ctx, nextHop)
 	if err != nil {
-		logger.Warn("next hop unreachable", "response_code", protocol.ConnectCodeNextHopUnreachable.String(), "error", err)
 		_ = protocol.WriteConnectResponse(inbound, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeNextHopUnreachable, Message: err.Error()})
 		_ = inbound.Close()
 		return
@@ -154,31 +165,24 @@ func (rt *serverRuntime) handleRelayStream(logger *slog.Logger, req protocol.Con
 	forwarded := req
 	forwarded.Route = append([]string(nil), req.Route[1:]...)
 	if err := protocol.WriteConnectRequest(outbound, forwarded); err != nil {
-		logger.Warn("write next hop connect request failed", "response_code", protocol.ConnectCodeNextHopUnreachable.String(), "error", err)
 		_ = protocol.WriteConnectResponse(inbound, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeNextHopUnreachable, Message: err.Error()})
 		_ = inbound.Close()
 		return
 	}
 	resp, err := protocol.ReadConnectResponse(outbound)
 	if err != nil {
-		logger.Warn("read next hop connect response failed", "response_code", protocol.ConnectCodeNextHopUnreachable.String(), "error", err)
 		_ = protocol.WriteConnectResponse(inbound, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeNextHopUnreachable, Message: err.Error()})
 		_ = inbound.Close()
 		return
 	}
-	if err := protocol.WriteConnectResponse(inbound, resp); err != nil {
-		logger.Warn("write upstream connect response failed", "response_code", resp.Code.String(), "error", err)
+	if err := protocol.WriteConnectResponse(inbound, resp); err != nil || !resp.OK {
 		_ = inbound.Close()
 		return
 	}
-	if !resp.OK {
-		logger.Warn("relay connect rejected", "response_code", resp.Code.String(), "error", resp.Message)
-		_ = inbound.Close()
-		return
+	if rt.logger != nil {
+		rt.logger.Info("relay stream connected", "peer_id", peerID, "next_hop", nextHop, "egress", req.Egress, "service", req.Service)
 	}
-	logger.Info("relay stream connected", "response_code", resp.Code.String())
 	proxyStreams(inbound, outbound)
-	logger.Info("relay proxy closed")
 }
 
 func validateConnectRoute(nodeID string, route []string, egress string) error {

@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+
+	"github.com/awithy/qoru/internal/requestid"
 )
 
 const (
@@ -75,10 +77,11 @@ type Frame struct {
 }
 
 type ConnectRequest struct {
-	Protocol string
-	Service  string
-	Egress   string
-	Route    []string
+	RequestID string
+	Protocol  string
+	Service   string
+	Egress    string
+	Route     []string
 }
 
 type ConnectResponse struct {
@@ -129,6 +132,10 @@ func ReadFrame(r io.Reader) (Frame, error) {
 }
 
 func WriteConnectRequest(w io.Writer, req ConnectRequest) error {
+	requestID, err := requestid.ParseBytes(req.RequestID)
+	if err != nil {
+		return fmt.Errorf("request_id must be a valid UUIDv7: %w", err)
+	}
 	if req.Protocol == "" {
 		return fmt.Errorf("protocol is required")
 	}
@@ -158,10 +165,12 @@ func WriteConnectRequest(w io.Writer, req ConnectRequest) error {
 		routeLen += 2 + len(hop)
 	}
 
-	payload := make([]byte, 1+len(req.Protocol)+2+len(req.Service)+2+len(req.Egress)+routeLen)
-	payload[0] = uint8(len(req.Protocol))
-	copy(payload[1:], req.Protocol)
-	offset := 1 + len(req.Protocol)
+	payload := make([]byte, 16+1+len(req.Protocol)+2+len(req.Service)+2+len(req.Egress)+routeLen)
+	copy(payload[0:16], requestID[:])
+	offset := 16
+	payload[offset] = uint8(len(req.Protocol))
+	copy(payload[offset+1:], req.Protocol)
+	offset += 1 + len(req.Protocol)
 	binary.BigEndian.PutUint16(payload[offset:offset+2], uint16(len(req.Service)))
 	copy(payload[offset+2:], req.Service)
 	offset += 2 + len(req.Service)
@@ -187,23 +196,28 @@ func ReadConnectRequest(r io.Reader) (ConnectRequest, error) {
 	if frame.Type != TypeConnectRequest {
 		return ConnectRequest{}, fmt.Errorf("unexpected message type %d", frame.Type)
 	}
-	if len(frame.Payload) < 3 {
+	if len(frame.Payload) < 19 {
 		return ConnectRequest{}, fmt.Errorf("malformed connect payload")
 	}
 
-	protocolLen := int(frame.Payload[0])
+	requestID, err := requestid.FromBytes(frame.Payload[0:16])
+	if err != nil {
+		return ConnectRequest{}, fmt.Errorf("malformed request_id: %w", err)
+	}
+	offset := 16
+	protocolLen := int(frame.Payload[offset])
 	if protocolLen == 0 {
 		return ConnectRequest{}, fmt.Errorf("protocol is required")
 	}
 	if protocolLen > MaxProtocolLength {
 		return ConnectRequest{}, fmt.Errorf("protocol too long: %d > %d", protocolLen, MaxProtocolLength)
 	}
-	if len(frame.Payload) < 1+protocolLen+2 {
+	if len(frame.Payload) < offset+1+protocolLen+2 {
 		return ConnectRequest{}, fmt.Errorf("malformed connect payload: missing service length")
 	}
 
-	protocol := string(frame.Payload[1 : 1+protocolLen])
-	offset := 1 + protocolLen
+	protocol := string(frame.Payload[offset+1 : offset+1+protocolLen])
+	offset += 1 + protocolLen
 	serviceLen := int(binary.BigEndian.Uint16(frame.Payload[offset : offset+2]))
 	if serviceLen == 0 {
 		return ConnectRequest{}, fmt.Errorf("service is required")
@@ -252,7 +266,7 @@ func ReadConnectRequest(r io.Reader) (ConnectRequest, error) {
 		return ConnectRequest{}, fmt.Errorf("malformed connect payload: trailing bytes")
 	}
 
-	return ConnectRequest{Protocol: protocol, Service: service, Egress: egress, Route: route}, nil
+	return ConnectRequest{RequestID: requestID, Protocol: protocol, Service: service, Egress: egress, Route: route}, nil
 }
 
 func WriteConnectResponse(w io.Writer, resp ConnectResponse) error {
