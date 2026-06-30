@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/awithy/qoru/internal/config"
+	"github.com/awithy/qoru/internal/requestid"
 )
 
 const defaultShutdownWaitTimeout = 5 * time.Second
@@ -148,6 +149,18 @@ func waitGroupTimeout(wg *sync.WaitGroup, timeout time.Duration) error {
 func handleLocalConnection(ctx context.Context, session upstreamSession, service, egress string, route []string, localConn net.Conn, logger *slog.Logger) {
 	defer localConn.Close()
 
+	requestID, err := requestid.New()
+	if err != nil {
+		if logger != nil {
+			logger.Error("generate request id failed", "service", service, "egress", egress, "route", route, "error", err)
+		}
+		return
+	}
+	if logger != nil {
+		logger = logger.With("request_id", requestID, "service", service, "egress", egress, "route", route, "local_addr", localConn.LocalAddr().String(), "remote_addr", localConn.RemoteAddr().String())
+		logger.Info("local tcp connection accepted")
+	}
+
 	stream, err := session.OpenTCPStream(ctx, service, egress, route)
 	if err != nil {
 		if logger != nil {
@@ -155,23 +168,27 @@ func handleLocalConnection(ctx context.Context, session upstreamSession, service
 			var backoff *ReconnectBackoffError
 			switch {
 			case errors.As(err, &rejected):
-				logger.Warn("tcp service rejected", "service", service, "egress", egress, "error", err)
+				logger.Warn("tcp service rejected", "response_code", rejected.Code.String(), "error", err)
 			case errors.As(err, &backoff):
 				logger.Warn(
 					"upstream reconnect backoff active",
-					"service", service,
-					"egress", egress,
 					"server_id", backoff.ServerID,
 					"addr", backoff.Address,
 					"next_attempt", backoff.NextAttempt.Format(time.RFC3339Nano),
 					"error", err,
 				)
 			default:
-				logger.Error("open tcp stream failed", "service", service, "egress", egress, "error", err)
+				logger.Error("open tcp stream failed", "error", err)
 			}
 		}
 		return
 	}
 
+	if logger != nil {
+		logger.Info("tcp stream connected")
+	}
 	proxyTCP(localConn, stream)
+	if logger != nil {
+		logger.Info("local tcp proxy closed")
+	}
 }
