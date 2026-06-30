@@ -23,6 +23,7 @@ Implemented today:
 - Client-side local TCP listeners from `forwards`.
 - One reconnecting upstream QUIC connection per configured client-side server.
 - Multiple configured direct upstream servers selected by forward `egress`.
+- Static service route candidates with ordered setup-time candidate fallback.
 - On-demand upstream reconnect for new local TCP connections after connection loss.
 - One QUIC stream per proxied local TCP connection.
 - Multiple local TCP forwards.
@@ -35,11 +36,14 @@ Implemented today:
 - Server-side TCP target dialing with timeout and basic service target address validation.
 - `ConnectResponse` success/failure handshake before raw TCP proxying begins.
 - Half-close-aware bidirectional byte proxying between local TCP, QUIC streams, and server-side TCP targets.
+- Service identity config, service certificate verification helpers, and development service certificate generation.
+- Protocol frame scaffolding for future E2E hello, encrypted data, and close frames.
 
 Not implemented yet:
 
 - resuming active proxied TCP connections across upstream QUIC reconnects
-- automatic multi-hop route selection
+- dynamic topology/service advertisement
+- authenticated E2E handshake and runtime negotiation
 - end-to-end encrypted payload frames
 - UDP forwarding
 
@@ -76,12 +80,14 @@ Loads and validates client config, establishes one QUIC/mTLS connection to each 
 
 For each local TCP connection:
 
-1. select an upstream by the forward's `egress` value, or the sole configured upstream when `egress` is empty
+1. resolve the forward to one or more route candidates, using explicit forward `route`/`egress` first and then top-level static `routes` by `protocol + service`
 2. generate a UUIDv7 request ID
-3. open a new QUIC stream on the selected upstream connection
-4. send `ConnectRequest{RequestID: "...", Protocol: "tcp", Service: "...", Egress: "...", Route: [...]}`
-5. read `ConnectResponse`
-6. if OK, proxy bytes between the local TCP connection and QUIC stream
+3. try route candidates in order for `selection: ordered`
+4. open a new QUIC stream on the candidate's first-hop upstream connection
+5. send `ConnectRequest{RequestID: "...", Protocol: "tcp", Service: "...", Egress: "...", Route: [...]}`
+6. read `ConnectResponse`
+7. if setup fails with a retryable setup error before proxying begins, try the next candidate
+8. if OK, proxy bytes between the local TCP connection and QUIC stream
 
 ### `qoru server`
 
@@ -845,9 +851,17 @@ docs/                  design documentation
 
 Current priority is to advance service-first routing and end-to-end payload encryption while deferring broader operability, topology/control-plane, and UDP work.
 
-1. Add a minimal static service route-candidate model so a forward can request a service and the client can select an egress/route candidate per connection.
-2. Support multiple static candidates for the same service, with simple selection such as ordered failover, round-robin, or random.
-3. Add service identity certificates using SPIFFE-style service URI SANs such as `spiffe://qoru/service/echo`.
-4. Add an E2E handshake where the egress proves service identity with its own service cert/key and the ingress proves original client identity.
-5. Replace raw post-connect TCP bytes with encrypted framed payload records between ingress and egress.
-6. Later: dynamic service advertisement/topology, richer health-aware route selection, and UDP support.
+Completed in the current service/E2E track:
+
+1. Static service route-candidate config and validation.
+2. Client route resolution from forwards to static candidates.
+3. Ordered setup-time candidate fallback.
+4. Service identity certificates using SPIFFE-style service URI SANs such as `spiffe://qoru/service/echo`.
+5. Protocol frame scaffolding for E2E hello, encrypted data, and close frames.
+
+Next:
+
+1. Add runtime E2E negotiation and an authenticated E2E handshake where the egress proves service identity with its own service cert/key and the ingress proves original client identity.
+2. Replace raw post-connect TCP bytes with encrypted framed payload records between ingress and egress.
+3. Add E2E policy enforcement, such as requiring E2E for services with `services[].e2e`.
+4. Later: dynamic service advertisement/topology, richer health-aware route selection, non-ordered candidate selection policies, and UDP support.

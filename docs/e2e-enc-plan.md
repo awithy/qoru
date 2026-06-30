@@ -42,11 +42,30 @@ relay-c service cert: URI:spiffe://qoru/service/echo
 
 The client verifies that the selected egress proves possession of a trusted service certificate for the requested service.
 
+## Progress Summary
+
+Completed:
+
+- static `routes` config shape and validation
+- client route resolution from forwards to static candidates
+- ordered setup-time candidate fallback
+- service identity config, cert parsing/verification helpers, and dev service cert generation
+- protocol frame scaffolding for E2E hello/data/close frames
+
+Not implemented yet:
+
+- runtime E2E negotiation
+- authenticated E2E handshake
+- encrypted payload proxying
+- E2E policy enforcement
+
+Next slice: authenticated E2E handshake without encrypted payload.
+
 ## Slice 1: Static Route-Candidate Config
 
-Status: implemented for config loading and validation. No runtime behavior change yet.
+Status: implemented.
 
-Add config structs and validation for static service route candidates. No runtime behavior change yet.
+Added config structs and validation for static service route candidates.
 
 Example future shape:
 
@@ -75,9 +94,9 @@ Validation:
 
 ## Slice 2: Client Route Resolution
 
-Status: implemented for first-candidate static route resolution. Candidate fallback is not implemented yet.
+Status: implemented.
 
-Teach the client to resolve each forward to a selected route candidate.
+The client resolves each forward to one or more selected route candidates.
 
 A forward should eventually be able to identify only the service:
 
@@ -105,7 +124,7 @@ type SelectedRoute struct {
 }
 ```
 
-The existing `ConnectRequest` fields can still be used once a concrete candidate is selected.
+The existing `ConnectRequest` fields are used once a concrete candidate is selected.
 
 ## Slice 3: Candidate Selection and Setup-Time Fallback
 
@@ -132,7 +151,12 @@ Likely non-retryable setup failures:
 - unsupported protocol
 - malformed or invalid route caused by config error
 
-This can be tuned after implementation.
+Implemented retryability policy:
+
+- retry: transport/open-stream errors, reconnect/backoff, `UNREACHABLE_EGRESS`, `NEXT_HOP_UNREACHABLE`, `TARGET_DIAL_FAILED`
+- do not retry: `ACCESS_DENIED`, `SERVICE_NOT_FOUND`, `UNSUPPORTED_PROTOCOL`, `ROUTE_INVALID`, `INTERNAL_ERROR`
+
+This can be tuned later if needed.
 
 ## Slice 4: Service Identity Certificate Plumbing
 
@@ -201,6 +225,8 @@ The current binary `ConnectRequest` format is fixed, so this may require a proto
 
 ## Slice 6: Authenticated E2E Handshake Without Encrypted Payload
 
+Status: next.
+
 Implement the E2E identity handshake first, but temporarily continue proxying plaintext afterward.
 
 Goals:
@@ -227,6 +253,8 @@ Transcript binding should include at least:
 This protects against replay or confused-context handshakes.
 
 ## Slice 7: Encrypted Data Frames
+
+Status: not started.
 
 Replace raw post-connect TCP bytes with encrypted payload frames.
 
@@ -271,6 +299,8 @@ Open design items:
 - half-close behavior over encrypted frames
 
 ## Slice 8: Require and Enforce E2E Policy
+
+Status: not started.
 
 Once encrypted payload frames work, add policy controls.
 
