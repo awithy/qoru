@@ -24,8 +24,9 @@ type Config struct {
 	Peers   []PeerConfig   `yaml:"peers,omitempty"`
 	Listen  string         `yaml:"listen,omitempty"`
 
-	Forwards []ForwardConfig `yaml:"forwards,omitempty"`
-	Services []ServiceConfig `yaml:"services,omitempty"`
+	Forwards            []ForwardConfig `yaml:"forwards,omitempty"`
+	Services            []ServiceConfig `yaml:"services,omitempty"`
+	AllowedRelayClients []string        `yaml:"allowed_relay_clients,omitempty"`
 }
 
 type IdentityConfig struct {

@@ -12,6 +12,27 @@ var (
 	ErrAccessDenied    = errors.New("access denied")
 )
 
+func authorizeRelayIngress(cfg *config.Config, peerID string) error {
+	if len(cfg.AllowedRelayClients) == 0 {
+		return nil
+	}
+	for _, allowed := range cfg.AllowedRelayClients {
+		if allowed == peerID {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: peer %q is not allowed to use this node as a relay", ErrAccessDenied, peerID)
+}
+
+func requireConfiguredPeer(cfg *config.Config, peerID string) error {
+	for _, peer := range cfg.Peers {
+		if peer.ID == peerID {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: peer %q is not configured as a relay peer", ErrAccessDenied, peerID)
+}
+
 func resolveService(cfg *config.Config, peerID, protocol, service string) (config.ServiceConfig, error) {
 	for _, svc := range cfg.Services {
 		if svc.Protocol != protocol || svc.Name != service {

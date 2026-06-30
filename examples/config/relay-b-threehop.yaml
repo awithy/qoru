@@ -8,7 +8,11 @@ identity:
 
 listen: 127.0.0.1:4434
 
+allowed_relay_clients:
+  - relay-a
+
 peers:
+  - id: relay-a
   - id: relay-c
     address: 127.0.0.1:4435
     dial: true

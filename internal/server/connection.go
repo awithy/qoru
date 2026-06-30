@@ -91,8 +91,27 @@ func (rt *serverRuntime) handleStream(peerID string, stream *quic.Stream) {
 	}
 
 	if len(req.Route) > 1 {
+		if err := authorizeRelayIngress(rt.cfg, peerID); err != nil {
+			if rt.logger != nil {
+				rt.logger.Warn("relay ingress denied", "peer_id", peerID, "route", req.Route, "egress", req.Egress, "error", err)
+			}
+			_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeAccessDenied, Message: err.Error()})
+			_ = stream.Close()
+			return
+		}
 		rt.handleRelayStream(peerID, req, stream)
 		return
+	}
+
+	if len(req.Route) == 1 {
+		if err := requireConfiguredPeer(rt.cfg, peerID); err != nil {
+			if rt.logger != nil {
+				rt.logger.Warn("routed egress peer denied", "peer_id", peerID, "route", req.Route, "egress", req.Egress, "error", err)
+			}
+			_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeAccessDenied, Message: err.Error()})
+			_ = stream.Close()
+			return
+		}
 	}
 
 	if req.Egress != "" && req.Egress != rt.cfg.NodeID {

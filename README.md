@@ -25,6 +25,7 @@ TCP client -> qoru client -> relay-a -> relay-b -> TCP target
 - Multiple local TCP forwards.
 - Named TCP services on the server.
 - Per-service peer authorization.
+- Explicit relay ingress authorization with `allowed_relay_clients`.
 - Optional one-hop egress selection.
 - Explicit-route multi-hop TCP forwarding using configured relay peers.
 - Startup dialing, inbound session registration, and connection reuse for configured relay peers.
@@ -196,17 +197,51 @@ identity:
 
 listen: 127.0.0.1:4433
 
+allowed_relay_clients:
+  - client-1
+
 peers:
   - id: relay-b
     address: 127.0.0.1:4434
     dial: true
 ```
 
-The next-hop relay can list the initiating peer without dialing back:
+Relay authorization has two separate controls:
+
+- `allowed_relay_clients` authorizes authenticated nodes that may use this node as an intermediate relay.
+- top-level `peers` defines relay neighbors. When a routed request reaches its egress node, the previous-hop relay must be listed here.
+
+For a two-hop route such as:
+
+```text
+client-1 -> relay-a -> relay-b -> echo
+```
+
+`relay-a` must authorize the ingress client:
+
+```yaml
+allowed_relay_clients:
+  - client-1
+```
+
+`relay-b` must list `relay-a` as a relay peer, without dialing back:
 
 ```yaml
 peers:
   - id: relay-a
+```
+
+For a three-hop route, the middle relay must do both:
+
+```yaml
+allowed_relay_clients:
+  - relay-a
+
+peers:
+  - id: relay-a
+  - id: relay-c
+    address: 127.0.0.1:4435
+    dial: true
 ```
 
 ## Security Model
@@ -219,6 +254,8 @@ QUIC mTLS                        = hop-by-hop, peer -> peer
 ```
 
 The current implementation has QUIC/mTLS hop-by-hop encryption and authentication. End-to-end application payload encryption for multi-hop relay paths is not implemented yet.
+
+Relay authorization is explicit for routed traffic. Intermediate relays require the authenticated previous hop to be listed in `allowed_relay_clients`; routed egress nodes require the previous-hop relay to be listed in top-level `peers`. Final service access is still controlled separately by each service's `peers` allowlist. If a service's `peers` list is omitted or empty, any authenticated peer may use that service.
 
 If the client-side upstream QUIC connection is lost, active proxied TCP connections on that connection are closed. The qoru client keeps its local listeners running and reconnects on demand for later local TCP connections. Failed reconnect dials use exponential backoff: `500ms`, `1s`, `2s`, `4s`, `8s`, `16s`, capped at `16s`. During backoff, new local TCP connections fail fast without qoru writing diagnostic bytes into the TCP stream.
 
@@ -260,7 +297,7 @@ Longer-term:
 ```text
 docs/design.md
 docs/local-demo.md
-docs/design-discussion1.md
+docs/archive/design-discussion1.md
 ```
 
 Example multi-hop configs:
@@ -274,7 +311,7 @@ examples/config/relay-b-threehop.yaml
 examples/config/relay-c.yaml
 ```
 
-Server/relay configs use `peers` for relay neighbors; client configs use `servers` for direct upstream entry points. For now, configure `dial: true` on only one side of a peer relationship. The other side may list the peer without `dial` or with `dial: false` to accept/register inbound sessions. Dialing peers reconnect forever with capped exponential backoff. Mutual dialing is unsupported; duplicate peer sessions are logged and closed with the first live session winning.
+Server/relay configs use `peers` for relay neighbors; client configs use `servers` for direct upstream entry points. For routed egress traffic, the previous-hop relay must be listed in top-level `peers`. For intermediate relay forwarding, the previous hop must be listed in `allowed_relay_clients`; if this list is omitted or empty, any authenticated node may use that server as an intermediate relay. For now, configure `dial: true` on only one side of a peer relationship. The other side should list the peer without `dial` or with `dial: false` to accept/register inbound sessions. Dialing peers reconnect forever with capped exponential backoff. Mutual dialing is unsupported; duplicate peer sessions are logged and closed with the first live session winning.
 
 ## Status
 

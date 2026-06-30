@@ -28,6 +28,8 @@ Implemented today:
 - Multiple local TCP forwards.
 - Server support for multiple streams per QUIC connection.
 - Server-side named TCP services with per-service peer authorization.
+- Explicit relay ingress authorization with `allowed_relay_clients`.
+- Routed egress peer authorization through top-level `peers`.
 - Optional one-hop egress selection; selected egress must currently be the connected server unless an explicit route is provided.
 - Explicit-route multi-hop TCP forwarding through configured next-hop servers.
 - Server-side TCP target dialing with timeout and basic service target address validation.
@@ -79,7 +81,7 @@ For each local TCP connection:
 3. open a new QUIC stream on the selected upstream connection
 4. send `ConnectRequest{RequestID: "...", Protocol: "tcp", Service: "...", Egress: "...", Route: [...]}`
 5. read `ConnectResponse`
-5. if OK, proxy bytes between the local TCP connection and QUIC stream
+6. if OK, proxy bytes between the local TCP connection and QUIC stream
 
 ### `qoru server`
 
@@ -181,7 +183,7 @@ forwards:
     egress: server-1
 ```
 
-The client requests a named service. Service names are currently resolved on the selected direct upstream server. `egress` is optional when exactly one upstream server is configured; empty means that server may satisfy the request. When multiple upstream servers are configured, each forward must set `egress` to one configured server ID. In the current one-hop implementation, the selected server also requires any non-empty request `egress` to match its own `node_id`.
+The client requests a named service. Service names are currently resolved on the selected direct upstream server for one-hop requests, or on the final route hop for explicit-route requests. `egress` is optional when exactly one upstream server is configured and no explicit route is used; empty means that server may satisfy the request. When multiple upstream servers are configured and no explicit route is used, each forward must set `egress` to one configured server ID. For explicit routes, the first route hop selects the direct upstream server, and `egress`, if set, must match the final route hop.
 
 A forward may include a `route` field for explicit multi-hop routing. The first hop must be a configured direct upstream server. The final hop is the egress node:
 
@@ -196,7 +198,15 @@ forwards:
       - relay-b
 ```
 
-When a relay receives a routed request, the route is interpreted as the remaining path beginning with the current node. The relay validates `route[0] == node_id`; if more hops remain, it dials `route[1]`, forwards the request with the current hop removed, and proxies stream bytes. The first multi-hop implementation uses hop-by-hop QUIC/mTLS only; intermediary relays can observe raw proxied bytes until end-to-end payload encryption is added.
+When a relay receives a routed request, the route is interpreted as the remaining path beginning with the current node. The relay validates `route[0] == node_id`.
+
+Relay authorization is explicit:
+
+- if more hops remain, the authenticated previous hop must be listed in `allowed_relay_clients`; if the list is omitted or empty, any authenticated node may use this server as an intermediate relay
+- when a routed request reaches its egress node (`len(route) == 1`), the authenticated previous-hop relay must be listed in top-level `peers`
+- final local service access is checked separately with `services[].peers`
+
+If more hops remain, the relay opens a stream to `route[1]`, forwards the request with the current hop removed, and proxies stream bytes. The first multi-hop implementation uses hop-by-hop QUIC/mTLS only; intermediary relays can observe raw proxied bytes until end-to-end payload encryption is added.
 
 A client may configure multiple direct upstream servers:
 
@@ -220,6 +230,8 @@ forwards:
 
 ### Server config
 
+One-hop service egress:
+
 ```yaml
 node_id: server-1
 mode: server
@@ -237,6 +249,52 @@ services:
     target: 127.0.0.1:9000
     peers:
       - client-1
+```
+
+Intermediate relay:
+
+```yaml
+node_id: relay-a
+mode: server
+
+identity:
+  cert: ./dev/certs/relay-a.crt
+  key: ./dev/certs/relay-a.key
+  ca: ./dev/certs/ca.crt
+
+listen: 127.0.0.1:4433
+
+allowed_relay_clients:
+  - client-1
+
+peers:
+  - id: relay-b
+    address: 127.0.0.1:4434
+    dial: true
+```
+
+Routed egress relay:
+
+```yaml
+node_id: relay-b
+mode: server
+
+identity:
+  cert: ./dev/certs/relay-b.crt
+  key: ./dev/certs/relay-b.key
+  ca: ./dev/certs/ca.crt
+
+listen: 127.0.0.1:4434
+
+peers:
+  - id: relay-a
+
+services:
+  - name: echo
+    protocol: tcp
+    target: 127.0.0.1:9000
+    peers:
+      - relay-a
 ```
 
 ## Config Validation
@@ -266,10 +324,11 @@ Server required fields:
 - `mode: server`
 - `listen`
 
-Server service fields:
+Server service and relay fields:
 
 - `services`: named protocol-aware services this server can provide. Each service has `name`, `protocol`, `target`, and optional `peers`. If `peers` is omitted or empty, any authenticated peer may use that service.
-- `peers`: optional configured relay peers. Each peer has `id`, optional `address`, and optional `dial`. Conceptually, `peers` represents allowed overlay neighbors. `dial: true` means this node should initiate/maintain an outbound connection to that peer; `address` is required when `dial: true`. `dial: false` or omitted means the peer relationship may be inbound-only. Current forwarding can use configured outbound peers; inbound-only peer registration is not implemented yet.
+- `peers`: optional configured relay peers. Each peer has `id`, optional `address`, and optional `dial`. Conceptually, `peers` represents allowed overlay neighbors. `dial: true` means this node should initiate/maintain an outbound connection to that peer; `address` is required when `dial: true`. `dial: false` or omitted means the peer relationship may be inbound-only. Routed egress requests require the previous-hop relay to be listed here.
+- `allowed_relay_clients`: optional list of authenticated node IDs allowed to use this node as an intermediate relay. A routed request with more than one remaining hop is rejected unless the previous hop appears in this list. If omitted or empty, any authenticated node may use this server as an intermediate relay.
 
 ## TLS and Identity
 
@@ -469,7 +528,7 @@ Current limitation: reconnect is on demand and applies only to future local TCP 
 
 The long-term relay model treats node-to-node QUIC connections as logical peer sessions, independent of which side initiated the underlying connection.
 
-Peer config should be understood as an allowed overlay-neighbor relationship, not merely a dial target. In the current implementation, only the side that initiates a relay-to-relay connection needs a `peers` entry with `address` and `dial: true`. In the target model, both sides should usually define each other as peers; `dial` controls whether a node initiates the connection or only accepts/registers an inbound session.
+Peer config should be understood as an allowed overlay-neighbor relationship, not merely a dial target. In the current implementation, the side that initiates a relay-to-relay connection needs a `peers` entry with `address` and `dial: true`; the listening side should also list the initiating relay without `dial` so routed egress requests from that relay are authorized and the inbound connection can be registered as a reusable peer session. `dial` controls whether a node initiates/maintains the connection or only accepts/registers an inbound session.
 
 A relay/server should eventually:
 
@@ -484,7 +543,7 @@ In this model, route forwarding asks for an authenticated peer session by node I
 
 For now, do not configure both sides of a peer relationship with `dial: true`. Exactly one side should initiate and the other side should list the peer without `dial` or with `dial: false`. Mutual dialing is intentionally unsupported for now to keep session ownership simple.
 
-Current implementation note: explicit-route relay forwarding uses peer sessions keyed by authenticated node ID. A server attempts to dial configured `dial: true` peers at startup, but startup continues if a peer is unavailable. Dialing peers are maintained by background reconnect loops with capped exponential backoff: `500ms`, `1s`, `2s`, `4s`, `8s`, `16s`, then `16s` forever until reconnect succeeds. Forwarding also reconnects on demand when backoff allows; during backoff, route requests fail fast with `NEXT_HOP_UNREACHABLE`. Accepted inbound connections from configured peers are also registered as reusable peer sessions, so either side can open streams on the same QUIC connection. Inbound connections from nodes not listed in `peers` are still accepted for normal client/service use, but are not registered as relay peer sessions. If a duplicate peer session appears, the first live session wins and the duplicate is logged and closed.
+Current implementation note: explicit-route relay forwarding uses peer sessions keyed by authenticated node ID. Intermediate relay forwarding requires the authenticated previous hop to be listed in `allowed_relay_clients`; routed egress requires the previous-hop relay to be listed in top-level `peers`. A server attempts to dial configured `dial: true` peers at startup, but startup continues if a peer is unavailable. Dialing peers are maintained by background reconnect loops with capped exponential backoff: `500ms`, `1s`, `2s`, `4s`, `8s`, `16s`, then `16s` forever until reconnect succeeds. Forwarding also reconnects on demand when backoff allows; during backoff, route requests fail fast with `NEXT_HOP_UNREACHABLE`. Accepted inbound connections from configured peers are also registered as reusable peer sessions, so either side can open streams on the same QUIC connection. Inbound connections from nodes not listed in `peers` are still accepted for normal client/service use, but are not registered as relay peer sessions. If a duplicate peer session appears, the first live session wins and the duplicate is logged and closed.
 
 ## Server Runtime
 
@@ -507,7 +566,7 @@ The current server runtime lives in `internal/server`.
 13. if OK, proxies bytes between the QUIC stream and TCP target
 14. exits cleanly when the context is canceled
 
-For routed requests, the receiving server validates that the first remaining route hop is its own `node_id`. If additional hops remain, it dials the next configured peer, forwards the request with its own hop removed from `route`, relays the downstream `ConnectResponse` back upstream, and then proxies raw bytes between QUIC streams.
+For routed requests, the receiving server validates that the first remaining route hop is its own `node_id`. If additional hops remain, the previous hop must be authorized by `allowed_relay_clients`; the relay then opens a stream to the next configured peer, forwards the request with its own hop removed from `route`, relays the downstream `ConnectResponse` back upstream, and then proxies raw bytes between QUIC streams. If no additional hops remain, the server is the routed egress; the previous-hop relay must be listed in top-level `peers` before service resolution and `services[].peers` authorization are evaluated.
 
 Current limitation: accepted inbound peer connections are registered for forwarding when the authenticated node ID appears in `peers`, but mutual dialing is unsupported. If a duplicate peer session appears, the first live session wins and the duplicate is logged and closed.
 
@@ -550,6 +609,8 @@ relay-a.crt
 relay-a.key
 relay-b.crt
 relay-b.key
+relay-c.crt
+relay-c.key
 ```
 
 `dev/certs/` is ignored by git.
@@ -597,6 +658,7 @@ internal/client/       QUIC client runtime, upstream sessions, stream setup, and
 internal/config/       config structs, path resolution, YAML load/marshal, validation
 internal/identity/     TLS and mTLS identity loading
 internal/protocol/     custom binary frame protocol
+internal/requestid/    UUIDv7 request ID generation and validation
 internal/server/       QUIC server runtime and TCP proxying
 dev/echo-server/       local TCP echo target for demos
 dev/                   local development helpers

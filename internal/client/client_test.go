@@ -94,16 +94,18 @@ func TestRunProxiesExplicitMultiHopRoute(t *testing.T) {
 		Mode:     config.ModeServer,
 		Identity: makeDevNodeCert(t, "relay-b"),
 		Listen:   "127.0.0.1:0",
+		Peers:    []config.PeerConfig{{ID: "relay-a"}},
 		Services: []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: targetListener.Addr().String(), Peers: []string{"relay-a"}}},
 	}
 	egressAddr, egressErr := startTestServerWithConfig(t, ctx, logger, egressCfg, func(req protocol.ConnectRequest) { requestedAtEgress <- req })
 
 	relayCfg := &config.Config{
-		NodeID:   "relay-a",
-		Mode:     config.ModeServer,
-		Identity: makeDevNodeCert(t, "relay-a"),
-		Listen:   "127.0.0.1:0",
-		Peers:    []config.PeerConfig{{ID: "relay-b", Address: egressAddr, Dial: true}},
+		NodeID:              "relay-a",
+		Mode:                config.ModeServer,
+		Identity:            makeDevNodeCert(t, "relay-a"),
+		Listen:              "127.0.0.1:0",
+		Peers:               []config.PeerConfig{{ID: "relay-b", Address: egressAddr, Dial: true}},
+		AllowedRelayClients: []string{"client-1"},
 	}
 	relayAddr, relayErr := startTestServerWithConfig(t, ctx, logger, relayCfg, func(req protocol.ConnectRequest) { requestedAtRelay <- req })
 
@@ -154,11 +156,12 @@ func TestRunProxiesUsingInboundPeerSession(t *testing.T) {
 	targetListener := startEchoTCPServer(t)
 
 	relayACfg := &config.Config{
-		NodeID:   "relay-a",
-		Mode:     config.ModeServer,
-		Identity: makeDevNodeCert(t, "relay-a"),
-		Listen:   "127.0.0.1:0",
-		Peers:    []config.PeerConfig{{ID: "relay-b"}},
+		NodeID:              "relay-a",
+		Mode:                config.ModeServer,
+		Identity:            makeDevNodeCert(t, "relay-a"),
+		Listen:              "127.0.0.1:0",
+		Peers:               []config.PeerConfig{{ID: "relay-b"}},
+		AllowedRelayClients: []string{"client-1"},
 	}
 	relayAAddr, relayAErr := startTestServerWithConfig(t, ctx, logger, relayACfg, nil)
 

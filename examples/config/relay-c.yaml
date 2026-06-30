@@ -8,6 +8,9 @@ identity:
 
 listen: 127.0.0.1:4435
 
+peers:
+  - id: relay-b
+
 services:
   - name: echo
     protocol: tcp

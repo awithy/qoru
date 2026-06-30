@@ -161,6 +161,11 @@ func ValidateServer(cfg *Config) error {
 	if _, err := validateServerPeers(cfg); err != nil {
 		return err
 	}
+	for i, client := range cfg.AllowedRelayClients {
+		if client == "" {
+			return fmt.Errorf("allowed_relay_clients[%d] is required", i)
+		}
+	}
 	for i, svc := range cfg.Services {
 		if svc.Name == "" {
 			return fmt.Errorf("services[%d].name is required", i)

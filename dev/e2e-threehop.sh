@@ -50,6 +50,8 @@ identity:
   key: ./dev/certs/relay-c.key
   ca: ./dev/certs/ca.crt
 listen: $RELAY_C_ADDR
+peers:
+  - id: relay-b
 services:
   - name: echo
     protocol: tcp
@@ -65,7 +67,10 @@ identity:
   key: ./dev/certs/relay-b.key
   ca: ./dev/certs/ca.crt
 listen: $RELAY_B_ADDR
+allowed_relay_clients:
+  - relay-a
 peers:
+  - id: relay-a
   - id: relay-c
     address: $RELAY_C_ADDR
     dial: true
@@ -78,6 +83,8 @@ identity:
   key: ./dev/certs/relay-a.key
   ca: ./dev/certs/ca.crt
 listen: $RELAY_A_ADDR
+allowed_relay_clients:
+  - client-1
 peers:
   - id: relay-b
     address: $RELAY_B_ADDR
