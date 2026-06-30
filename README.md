@@ -241,6 +241,8 @@ examples/config/relay-a.yaml
 examples/config/relay-b.yaml
 ```
 
+Server/relay configs use `peers` for relay neighbors; client configs use `servers` for direct upstream entry points.
+
 ## Status
 
 Experimental. The current code supports a basic local one-hop TCP proxy over QUIC/mTLS. APIs, config, and protocol details are expected to change.

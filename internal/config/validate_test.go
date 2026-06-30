@@ -134,6 +134,30 @@ func TestValidateServerRejectsMissingListen(t *testing.T) {
 		t.Fatal("expected missing listen to be rejected")
 	}
 }
+
+func TestValidateServerAcceptsPeer(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.Peers = []PeerConfig{{ID: "relay-b", Address: "127.0.0.1:4434", Dial: true}}
+	if err := ValidateServer(&cfg); err != nil {
+		t.Fatalf("expected server peer to be accepted, got %v", err)
+	}
+}
+
+func TestValidateServerRejectsServers(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.Servers = []ServerConfig{{ID: "relay-b", Address: "127.0.0.1:4434"}}
+	if err := ValidateServer(&cfg); err == nil {
+		t.Fatal("expected server-mode servers to be rejected")
+	}
+}
+
+func TestValidateServerRejectsPeerDialWithoutAddress(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.Peers = []PeerConfig{{ID: "relay-b", Dial: true}}
+	if err := ValidateServer(&cfg); err == nil {
+		t.Fatal("expected peer dial without address to be rejected")
+	}
+}
 func TestValidateServerRejectsInvalidServiceProtocol(t *testing.T) {
 	cfg := validServerConfig()
 	cfg.Services[0].Protocol = "icmp"

@@ -100,7 +100,7 @@ func TestRunProxiesExplicitMultiHopRoute(t *testing.T) {
 		Mode:     config.ModeServer,
 		Identity: makeDevNodeCert(t, "relay-a"),
 		Listen:   "127.0.0.1:0",
-		Servers:  []config.ServerConfig{{ID: "relay-b", Address: egressAddr}},
+		Peers:    []config.PeerConfig{{ID: "relay-b", Address: egressAddr, Dial: true}},
 	}
 	relayAddr, relayErr := startTestServerWithConfig(t, ctx, logger, relayCfg, nil)
 

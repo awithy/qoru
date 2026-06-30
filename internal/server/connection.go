@@ -145,7 +145,7 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 
 func handleRelayStream(ctx context.Context, cfg *config.Config, peerID string, req protocol.ConnectRequest, inbound *quic.Stream, logger *slog.Logger) {
 	nextHop := req.Route[1]
-	serverCfg, ok := findServer(cfg, nextHop)
+	peerCfg, ok := findPeer(cfg, nextHop)
 	if !ok {
 		err := fmt.Errorf("next hop %q is not configured", nextHop)
 		if logger != nil {
@@ -164,10 +164,10 @@ func handleRelayStream(ctx context.Context, cfg *config.Config, peerID string, r
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, defaultTCPDialTimeout)
 	defer cancel()
-	downstream, err := quic.DialAddr(dialCtx, serverCfg.Address, tlsConfig, &quic.Config{})
+	downstream, err := quic.DialAddr(dialCtx, peerCfg.Address, tlsConfig, &quic.Config{})
 	if err != nil {
 		if logger != nil {
-			logger.Warn("next hop dial failed", "peer_id", peerID, "next_hop", nextHop, "addr", serverCfg.Address, "error", err)
+			logger.Warn("next hop dial failed", "peer_id", peerID, "next_hop", nextHop, "addr", peerCfg.Address, "error", err)
 		}
 		_ = protocol.WriteConnectResponse(inbound, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeNextHopUnreachable, Message: err.Error()})
 		_ = inbound.Close()
@@ -206,13 +206,13 @@ func handleRelayStream(ctx context.Context, cfg *config.Config, peerID string, r
 	proxyStreams(inbound, outbound)
 }
 
-func findServer(cfg *config.Config, id string) (config.ServerConfig, bool) {
-	for _, server := range cfg.Servers {
-		if server.ID == id {
-			return server, true
+func findPeer(cfg *config.Config, id string) (config.PeerConfig, bool) {
+	for _, peer := range cfg.Peers {
+		if peer.ID == id {
+			return peer, true
 		}
 	}
-	return config.ServerConfig{}, false
+	return config.PeerConfig{}, false
 }
 
 func proxyStreams(a, b *quic.Stream) {

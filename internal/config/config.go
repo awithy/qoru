@@ -21,6 +21,7 @@ type Config struct {
 	Identity IdentityConfig `yaml:"identity"`
 
 	Servers []ServerConfig `yaml:"servers,omitempty"`
+	Peers   []PeerConfig   `yaml:"peers,omitempty"`
 	Listen  string         `yaml:"listen,omitempty"`
 
 	Forwards []ForwardConfig `yaml:"forwards,omitempty"`
@@ -36,6 +37,12 @@ type IdentityConfig struct {
 type ServerConfig struct {
 	ID      string `yaml:"id"`
 	Address string `yaml:"address"`
+}
+
+type PeerConfig struct {
+	ID      string `yaml:"id"`
+	Address string `yaml:"address,omitempty"`
+	Dial    bool   `yaml:"dial,omitempty"`
 }
 
 type ForwardConfig struct {

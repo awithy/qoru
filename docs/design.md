@@ -268,7 +268,7 @@ Server required fields:
 Server service fields:
 
 - `services`: named protocol-aware services this server can provide. Each service has `name`, `protocol`, `target`, and optional `peers`. If `peers` is omitted or empty, any authenticated peer may use that service.
-- `servers`: optional configured next-hop peers this server may dial when acting as an intermediary relay for an explicit multi-hop route. Each entry uses the same `id`/`address` shape as client upstream servers.
+- `peers`: optional configured relay peers this server may use for explicit multi-hop forwarding. Each peer has `id`, optional `address`, and optional `dial`. If `dial: true`, `address` is required. The current relay forwarding implementation requires an address for the selected next hop because it still dials on demand.
 
 ## TLS and Identity
 
@@ -492,9 +492,9 @@ The current server runtime lives in `internal/server`.
 13. if OK, proxies bytes between the QUIC stream and TCP target
 14. exits cleanly when the context is canceled
 
-For routed requests, the receiving server validates that the first remaining route hop is its own `node_id`. If additional hops remain, it dials the next configured server, forwards the request with its own hop removed from `route`, relays the downstream `ConnectResponse` back upstream, and then proxies raw bytes between QUIC streams.
+For routed requests, the receiving server validates that the first remaining route hop is its own `node_id`. If additional hops remain, it dials the next configured peer, forwards the request with its own hop removed from `route`, relays the downstream `ConnectResponse` back upstream, and then proxies raw bytes between QUIC streams.
 
-Current limitation: relay-to-next-hop QUIC connections are created on demand per relayed TCP stream. The intended next evolution is a server-side peer/session manager that establishes configured peer connections at startup, also accepts inbound peer sessions, reuses sessions for forwarding, and treats peer relationships symmetrically regardless of dial direction.
+Current limitation: relay-to-next-hop QUIC connections are created on demand per relayed TCP stream using `peers[].address`. The intended next evolution is a server-side peer/session manager that establishes configured `dial: true` peer connections at startup, also accepts inbound peer sessions, reuses sessions for forwarding, and treats peer relationships symmetrically regardless of dial direction.
 
 ## CLI Runtime Wiring
 

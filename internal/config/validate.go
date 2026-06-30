@@ -103,6 +103,31 @@ func validateClientServers(cfg *Config) (map[string]ServerConfig, error) {
 	return validateConfiguredServers(cfg)
 }
 
+func validateServerPeers(cfg *Config) (map[string]PeerConfig, error) {
+	peers := make(map[string]PeerConfig)
+	for i, peer := range cfg.Peers {
+		if peer.ID == "" {
+			return nil, fmt.Errorf("peers[%d].id is required", i)
+		}
+		if peer.ID == cfg.NodeID {
+			return nil, fmt.Errorf("peers[%d].id must not match node_id", i)
+		}
+		if peer.Address != "" {
+			if _, _, err := net.SplitHostPort(peer.Address); err != nil {
+				return nil, fmt.Errorf("peers[%d].address must be host:port: %w", i, err)
+			}
+		}
+		if peer.Dial && peer.Address == "" {
+			return nil, fmt.Errorf("peers[%d].address is required when dial is true", i)
+		}
+		if _, exists := peers[peer.ID]; exists {
+			return nil, fmt.Errorf("peers[%d].id %q is duplicated", i, peer.ID)
+		}
+		peers[peer.ID] = peer
+	}
+	return peers, nil
+}
+
 func validateConfiguredServers(cfg *Config) (map[string]ServerConfig, error) {
 	servers := make(map[string]ServerConfig)
 	for i, server := range cfg.Servers {
@@ -130,7 +155,10 @@ func ValidateServer(cfg *Config) error {
 	if cfg.Listen == "" {
 		return fmt.Errorf("listen is required for server mode")
 	}
-	if _, err := validateConfiguredServers(cfg); err != nil {
+	if len(cfg.Servers) > 0 {
+		return fmt.Errorf("servers is client-mode only; use peers for server relay configuration")
+	}
+	if _, err := validateServerPeers(cfg); err != nil {
 		return err
 	}
 	for i, svc := range cfg.Services {

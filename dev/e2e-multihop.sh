@@ -122,9 +122,10 @@ identity:
   key: ./dev/certs/relay-a.key
   ca: ./dev/certs/ca.crt
 listen: $RELAY_A_ADDR
-servers:
+peers:
   - id: relay-b
     address: $RELAY_B_ADDR
+    dial: true
 EOF
 
 cat >"$tmpdir/client.yaml" <<EOF

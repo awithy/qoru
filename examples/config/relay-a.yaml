@@ -8,6 +8,7 @@ identity:
 
 listen: 127.0.0.1:4433
 
-servers:
+peers:
   - id: relay-b
     address: 127.0.0.1:4434
+    dial: true
