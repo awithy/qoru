@@ -9,13 +9,14 @@ import (
 	"time"
 
 	"github.com/awithy/qoru/internal/config"
+	"github.com/awithy/qoru/internal/testcert"
 )
 
 func TestPeerConnectionBackoffFailsFast(t *testing.T) {
 	cfg := &config.Config{
 		NodeID:   "relay-a",
 		Mode:     config.ModeServer,
-		Identity: config.IdentityConfig{Cert: "../../dev/certs/relay-a.crt", Key: "../../dev/certs/relay-a.key", CA: "../../dev/certs/ca.crt"},
+		Identity: testcert.NodeIdentity(t, "relay-a"),
 		Peers:    []config.PeerConfig{{ID: "relay-b", Address: "127.0.0.1:1", Dial: true}},
 	}
 	sessions := newPeerSessions(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))

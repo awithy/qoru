@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/awithy/qoru/internal/config"
+	"github.com/awithy/qoru/internal/testcert"
 )
 
 func TestServerTLSConfig(t *testing.T) {
@@ -69,9 +70,5 @@ func TestTLSConfigMissingFilesReturnError(t *testing.T) {
 
 func devIdentity(t *testing.T, node string) config.IdentityConfig {
 	t.Helper()
-	return config.IdentityConfig{
-		Cert: "../../dev/certs/" + node + ".crt",
-		Key:  "../../dev/certs/" + node + ".key",
-		CA:   "../../dev/certs/ca.crt",
-	}
+	return testcert.NodeIdentity(t, node)
 }
