@@ -55,7 +55,8 @@ func (s *peerSessions) RegisterInbound(peerID string, conn *quic.Conn) bool {
 		return true
 	}
 	if existing := s.conns[peerID]; existing != nil && existing.Context().Err() == nil {
-		_ = conn.CloseWithError(0, "duplicate peer session")
+		s.logger.Warn("duplicate peer session rejected", "peer_id", peerID, "direction", "inbound")
+		_ = conn.CloseWithError(0, "duplicate peer session unsupported")
 		return true
 	}
 	s.conns[peerID] = conn
@@ -124,7 +125,8 @@ func (s *peerSessions) connection(ctx context.Context, peerID string) (*quic.Con
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if existing := s.conns[peerID]; existing != nil && existing.Context().Err() == nil {
-		_ = dialed.CloseWithError(0, "duplicate peer session")
+		s.logger.Warn("duplicate peer session rejected", "peer_id", peerID, "direction", "outbound")
+		_ = dialed.CloseWithError(0, "duplicate peer session unsupported")
 		return existing, nil
 	}
 	s.conns[peerID] = dialed

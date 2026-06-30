@@ -217,7 +217,7 @@ Near-term:
 - Improve active connection shutdown behavior.
 - Improve service dial failure behavior for local TCP clients.
 - Add better reconnect observability and clearer server-side session handling.
-- Add deterministic duplicate-session handling.
+- Improve duplicate peer-session diagnostics and validation where possible.
 - Improve automated explicit-route multi-hop smoke testing and demo config.
 - Add richer service selection semantics for future multi-egress/load-balanced service routing.
 
@@ -248,7 +248,7 @@ examples/config/relay-b-threehop.yaml
 examples/config/relay-c.yaml
 ```
 
-Server/relay configs use `peers` for relay neighbors; client configs use `servers` for direct upstream entry points. Today, only the relay that initiates a relay-to-relay connection needs a `peers` entry with `address` and `dial: true`. The target model is that both sides may define each other as peers, with `dial` controlling which side initiates versus only accepting inbound sessions.
+Server/relay configs use `peers` for relay neighbors; client configs use `servers` for direct upstream entry points. For now, configure `dial: true` on only one side of a peer relationship. The other side may list the peer without `dial` or with `dial: false` to accept/register inbound sessions. Mutual dialing is unsupported; duplicate peer sessions are logged and closed with the first live session winning.
 
 ## Status
 

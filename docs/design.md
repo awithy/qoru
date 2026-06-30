@@ -472,9 +472,9 @@ A relay/server should eventually:
 
 In this model, route forwarding asks for an authenticated peer session by node ID rather than dialing the next hop ad hoc for every proxied TCP connection.
 
-If two peers connect to each other at the same time, duplicate sessions must be resolved deterministically. A likely rule is to keep the connection initiated by the lexicographically lower node ID and close the duplicate. The exact duplicate-session policy is still to be implemented.
+For now, do not configure both sides of a peer relationship with `dial: true`. Exactly one side should initiate and the other side should list the peer without `dial` or with `dial: false`. Mutual dialing is intentionally unsupported for now to keep session ownership simple.
 
-Current implementation note: explicit-route relay forwarding uses peer sessions keyed by authenticated node ID. A server dials configured `dial: true` peers at startup, reuses the QUIC connection for relayed streams, and reconnects on demand if opening a stream fails. Accepted inbound connections from configured peers are also registered as reusable peer sessions, so either side can open streams on the same QUIC connection. Inbound connections from nodes not listed in `peers` are still accepted for normal client/service use, but are not registered as relay peer sessions.
+Current implementation note: explicit-route relay forwarding uses peer sessions keyed by authenticated node ID. A server dials configured `dial: true` peers at startup, reuses the QUIC connection for relayed streams, and reconnects on demand if opening a stream fails. Accepted inbound connections from configured peers are also registered as reusable peer sessions, so either side can open streams on the same QUIC connection. Inbound connections from nodes not listed in `peers` are still accepted for normal client/service use, but are not registered as relay peer sessions. If a duplicate peer session appears, the first live session wins and the duplicate is logged and closed.
 
 ## Server Runtime
 
@@ -499,7 +499,7 @@ The current server runtime lives in `internal/server`.
 
 For routed requests, the receiving server validates that the first remaining route hop is its own `node_id`. If additional hops remain, it dials the next configured peer, forwards the request with its own hop removed from `route`, relays the downstream `ConnectResponse` back upstream, and then proxies raw bytes between QUIC streams.
 
-Current limitation: accepted inbound peer connections are registered for forwarding when the authenticated node ID appears in `peers`, but duplicate-session handling is still simple: an existing live session wins and a duplicate is closed. The intended next evolution is an explicit deterministic duplicate-session policy so peer relationships are fully symmetric regardless of dial direction.
+Current limitation: accepted inbound peer connections are registered for forwarding when the authenticated node ID appears in `peers`, but mutual dialing is unsupported. If a duplicate peer session appears, the first live session wins and the duplicate is logged and closed.
 
 ## CLI Runtime Wiring
 
@@ -600,7 +600,7 @@ docs/                  design documentation
 2. Add clearer local TCP behavior when service setup/dialing fails.
 3. Improve reconnect observability and clearer server-side session handling.
 4. Consider configurable log level/log format and timeout settings.
-5. Add deterministic duplicate-session handling.
+5. Improve duplicate peer-session diagnostics and validation where possible.
 6. Improve explicit-route multi-hop smoke tests and demo docs.
 7. Add richer service selection semantics for future multi-egress/load-balanced service routing.
 8. Later: end-to-end encrypted payload frames.
