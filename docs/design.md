@@ -506,6 +506,7 @@ TypeE2EClientHello = 3
 TypeE2EServerHello = 4
 TypeE2EData = 5
 TypeE2EClose = 6
+TypeE2EClientFinished = 7
 MaxPayloadSize = 64*1024 - 1
 MaxProtocolLength = 32
 MaxTargetLength = 4096
@@ -583,6 +584,15 @@ signature        []byte
 
 `E2EServerHello` uses the same shape, but the certificate chain is the egress service certificate chain.
 
+`E2EClientFinished` payload:
+
+```text
+signature_len uint16 big endian
+signature     []byte
+```
+
+This third handshake frame lets the client sign the full transcript after receiving the egress ephemeral key.
+
 `E2EData` payload:
 
 ```text
@@ -606,11 +616,12 @@ Current E2E scaffolding limits:
 MaxE2ECertChainCount     = 8
 MaxE2ECertLength         = 16 KiB
 MaxE2EEphemeralKeyLength = 4096
-MaxE2ESignatureLength    = 8192
-MaxE2ENonceSuffixLength  = 24
+MaxE2ESignatureLength         = 8192
+MaxE2EFinishedSignatureLength = 8192
+MaxE2ENonceSuffixLength       = 24
 ```
 
-The exact handshake ordering, key schedule, AEAD, nonce construction, close-code semantics, and integration with `ConnectRequest` negotiation are still open design items.
+The handshake core uses X25519 ephemeral keys, certificate signatures, a transcript bound to `request_id`, `service`, `egress`, `route`, and both ephemeral keys, plus HKDF-derived directional traffic keys. Runtime negotiation, AEAD record encryption, nonce construction, close-code semantics, and integration with `ConnectRequest` negotiation are still open design items.
 
 Current TCP stream model:
 
@@ -836,6 +847,7 @@ cmd/qoru/              CLI entrypoint
 internal/cli/          Cobra commands and command wiring
 internal/client/       QUIC client runtime, upstream sessions, stream setup, and local TCP proxying
 internal/config/       config structs, path resolution, YAML load/marshal, validation
+internal/e2e/          E2E handshake transcript, certificate proof, and key-derivation helpers
 internal/identity/     TLS and mTLS identity loading
 internal/protocol/     custom binary frame protocol
 internal/proxyio/      shared half-close-aware bidirectional proxying

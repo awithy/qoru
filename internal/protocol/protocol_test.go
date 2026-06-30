@@ -224,6 +224,22 @@ func TestE2ECloseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestE2EClientFinishedRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	want := E2EClientFinished{Signature: []byte("client-finished-sig")}
+
+	if err := WriteE2EClientFinished(&buf, want); err != nil {
+		t.Fatalf("WriteE2EClientFinished returned error: %v", err)
+	}
+	got, err := ReadE2EClientFinished(&buf)
+	if err != nil {
+		t.Fatalf("ReadE2EClientFinished returned error: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected %#v, got %#v", want, got)
+	}
+}
+
 func TestWriteE2EClientHelloRejectsMissingFields(t *testing.T) {
 	valid := E2EClientHello{ClientCertChain: [][]byte{[]byte("cert")}, EphemeralPublicKey: []byte("key"), Signature: []byte("sig")}
 	cases := []struct {
@@ -260,6 +276,12 @@ func TestWriteE2EDataRejectsMissingFields(t *testing.T) {
 	}
 	if err := WriteE2EData(io.Discard, E2EData{NonceSuffix: []byte("nonce")}); err == nil {
 		t.Fatal("expected missing ciphertext to be rejected")
+	}
+}
+
+func TestWriteE2EClientFinishedRejectsMissingSignature(t *testing.T) {
+	if err := WriteE2EClientFinished(io.Discard, E2EClientFinished{}); err == nil {
+		t.Fatal("expected missing signature to be rejected")
 	}
 }
 
@@ -300,5 +322,25 @@ func TestReadE2ECloseRejectsMalformedPayload(t *testing.T) {
 	}
 	if _, err := ReadE2EClose(&buf); err == nil {
 		t.Fatal("expected malformed close payload to be rejected")
+	}
+}
+
+func TestReadE2EClientFinishedRejectsWrongType(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteFrame(&buf, TypeE2EServerHello, []byte{0}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadE2EClientFinished(&buf); err == nil {
+		t.Fatal("expected wrong type to be rejected")
+	}
+}
+
+func TestReadE2EClientFinishedRejectsMalformedPayload(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteFrame(&buf, TypeE2EClientFinished, []byte{0, 4, 's'}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadE2EClientFinished(&buf); err == nil {
+		t.Fatal("expected malformed client finished payload to be rejected")
 	}
 }

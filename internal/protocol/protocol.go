@@ -18,12 +18,13 @@ const (
 type MessageType uint8
 
 const (
-	TypeConnectRequest  MessageType = 1
-	TypeConnectResponse MessageType = 2
-	TypeE2EClientHello  MessageType = 3
-	TypeE2EServerHello  MessageType = 4
-	TypeE2EData         MessageType = 5
-	TypeE2EClose        MessageType = 6
+	TypeConnectRequest    MessageType = 1
+	TypeConnectResponse   MessageType = 2
+	TypeE2EClientHello    MessageType = 3
+	TypeE2EServerHello    MessageType = 4
+	TypeE2EData           MessageType = 5
+	TypeE2EClose          MessageType = 6
+	TypeE2EClientFinished MessageType = 7
 )
 
 const (
@@ -32,13 +33,14 @@ const (
 )
 
 const (
-	MaxE2ECertChainCount     = 8
-	MaxE2ECertLength         = 16 * 1024
-	MaxE2EEphemeralKeyLength = 4096
-	MaxE2ESignatureLength    = 8192
-	MaxE2ENonceSuffixLength  = 24
-	MaxE2ECiphertextLength   = MaxPayloadSize - 3
-	MaxE2ECloseMessageLength = MaxPayloadSize - 3
+	MaxE2ECertChainCount          = 8
+	MaxE2ECertLength              = 16 * 1024
+	MaxE2EEphemeralKeyLength      = 4096
+	MaxE2ESignatureLength         = 8192
+	MaxE2EFinishedSignatureLength = MaxE2ESignatureLength
+	MaxE2ENonceSuffixLength       = 24
+	MaxE2ECiphertextLength        = MaxPayloadSize - 3
+	MaxE2ECloseMessageLength      = MaxPayloadSize - 3
 )
 
 type ConnectCode uint8
@@ -124,6 +126,10 @@ type E2EData struct {
 type E2EClose struct {
 	Code    uint8
 	Message string
+}
+
+type E2EClientFinished struct {
+	Signature []byte
 }
 
 func WriteFrame(w io.Writer, typ MessageType, payload []byte) error {
@@ -574,6 +580,19 @@ func WriteE2EClose(w io.Writer, close E2EClose) error {
 	return WriteFrame(w, TypeE2EClose, payload)
 }
 
+func WriteE2EClientFinished(w io.Writer, finished E2EClientFinished) error {
+	if len(finished.Signature) == 0 {
+		return fmt.Errorf("client finished signature is required")
+	}
+	if len(finished.Signature) > MaxE2EFinishedSignatureLength {
+		return fmt.Errorf("client finished signature too long: %d > %d", len(finished.Signature), MaxE2EFinishedSignatureLength)
+	}
+	payload := make([]byte, 2+len(finished.Signature))
+	binary.BigEndian.PutUint16(payload[0:2], uint16(len(finished.Signature)))
+	copy(payload[2:], finished.Signature)
+	return WriteFrame(w, TypeE2EClientFinished, payload)
+}
+
 func ReadE2EClose(r io.Reader) (E2EClose, error) {
 	frame, err := ReadFrame(r)
 	if err != nil {
@@ -593,6 +612,30 @@ func ReadE2EClose(r io.Reader) (E2EClose, error) {
 		return E2EClose{}, fmt.Errorf("malformed e2e close payload: message length mismatch")
 	}
 	return E2EClose{Code: frame.Payload[0], Message: string(frame.Payload[3:])}, nil
+}
+
+func ReadE2EClientFinished(r io.Reader) (E2EClientFinished, error) {
+	frame, err := ReadFrame(r)
+	if err != nil {
+		return E2EClientFinished{}, err
+	}
+	if frame.Type != TypeE2EClientFinished {
+		return E2EClientFinished{}, fmt.Errorf("unexpected message type %d", frame.Type)
+	}
+	if len(frame.Payload) < 2 {
+		return E2EClientFinished{}, fmt.Errorf("malformed e2e client finished payload")
+	}
+	signatureLen := int(binary.BigEndian.Uint16(frame.Payload[0:2]))
+	if signatureLen == 0 {
+		return E2EClientFinished{}, fmt.Errorf("client finished signature is required")
+	}
+	if signatureLen > MaxE2EFinishedSignatureLength {
+		return E2EClientFinished{}, fmt.Errorf("client finished signature too long: %d > %d", signatureLen, MaxE2EFinishedSignatureLength)
+	}
+	if len(frame.Payload[2:]) != signatureLen {
+		return E2EClientFinished{}, fmt.Errorf("malformed e2e client finished payload: signature length mismatch")
+	}
+	return E2EClientFinished{Signature: append([]byte(nil), frame.Payload[2:]...)}, nil
 }
 
 func readLengthPrefixedBytes(payload []byte, offset, maxLen int, field string) ([]byte, int, error) {

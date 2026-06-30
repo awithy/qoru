@@ -211,6 +211,7 @@ Potential new frame types:
 ```text
 TypeE2EClientHello
 TypeE2EServerHello
+TypeE2EClientFinished
 TypeE2EData
 TypeE2EClose
 ```
@@ -225,7 +226,7 @@ The current binary `ConnectRequest` format is fixed, so this may require a proto
 
 ## Slice 6: Authenticated E2E Handshake Without Encrypted Payload
 
-Status: next.
+Status: in progress. Protocol support for `E2EClientFinished` and an in-memory `internal/e2e` handshake core are implemented. Runtime wiring is next.
 
 Implement the E2E identity handshake first, but temporarily continue proxying plaintext afterward.
 
@@ -235,7 +236,8 @@ Goals:
 - client sends ephemeral public key
 - egress sends service cert chain
 - egress sends ephemeral public key
-- both sides sign or otherwise authenticate the handshake transcript
+- egress signs the full handshake transcript in `E2EServerHello`
+- client signs the full handshake transcript in `E2EClientFinished`
 - client verifies service identity matches `spiffe://qoru/service/<service>`
 - egress verifies original ingress client identity
 - both sides derive per-connection traffic keys
@@ -251,6 +253,15 @@ Transcript binding should include at least:
 - egress ephemeral key
 
 This protects against replay or confused-context handshakes.
+
+Implemented core pieces:
+
+- X25519 ephemeral key generation and shared-secret derivation
+- canonical transcript hashing
+- client node certificate verification against the node CA
+- service certificate verification against `spiffe://qoru/service/<service>`
+- RSA/ECDSA/Ed25519 certificate signature verification helpers
+- HKDF-derived directional traffic keys for later encrypted records
 
 ## Slice 7: Encrypted Data Frames
 
