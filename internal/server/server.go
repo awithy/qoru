@@ -25,11 +25,13 @@ type options struct {
 }
 
 type serverRuntime struct {
-	ctx    context.Context
-	cfg    *config.Config
+	ctx context.Context
+	cfg *config.Config
+
 	logger *slog.Logger
 	opts   options
 	peers  *peerSessions
+	e2e    *e2eServerRuntime
 
 	connWG sync.WaitGroup
 }
@@ -76,7 +78,12 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 		opts.started(addr)
 	}
 
-	rt := &serverRuntime{ctx: ctx, cfg: cfg, logger: logger, opts: opts}
+	e2eRuntime, err := newE2EServerRuntime(cfg)
+	if err != nil {
+		return err
+	}
+
+	rt := &serverRuntime{ctx: ctx, cfg: cfg, logger: logger, opts: opts, e2e: e2eRuntime}
 	rt.peers = newPeerSessions(cfg, logger)
 	// Outbound peer connections are bidirectional, so they also need a stream accept loop.
 	rt.peers.onConnected = rt.startConnection

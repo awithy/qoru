@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awithy/qoru/internal/config"
 	"github.com/awithy/qoru/internal/identity"
 	"github.com/awithy/qoru/internal/protocol"
 	"github.com/quic-go/quic-go"
@@ -108,6 +109,11 @@ func (rt *serverRuntime) handleStream(peerID string, stream *quic.Stream) {
 		return
 	}
 
+	if req.E2ERequired {
+		rt.handleE2EStream(req, stream, logger)
+		return
+	}
+
 	svc, err := resolveService(rt.cfg, peerID, req.Protocol, req.Service)
 	if err != nil {
 		code := serviceErrorCode(err)
@@ -116,7 +122,31 @@ func (rt *serverRuntime) handleStream(peerID string, stream *quic.Stream) {
 		_ = stream.Close()
 		return
 	}
+	if isServiceE2EConfigured(svc) && len(req.Route) > 0 {
+		err := fmt.Errorf("routed service %q requires e2e", req.Service)
+		logger.Warn("routed service requires e2e", "response_code", protocol.ConnectCodeAccessDenied.String(), "error", err)
+		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeAccessDenied, Message: err.Error()})
+		_ = stream.Close()
+		return
+	}
 
+	rt.handlePlaintextServiceStream(svc, stream, logger)
+}
+
+func (rt *serverRuntime) requestLogger(peerID string, req protocol.ConnectRequest) *slog.Logger {
+	return rt.logger.With(
+		"peer_id", peerID,
+		"request_id", req.RequestID,
+		"protocol", req.Protocol,
+		"service", req.Service,
+		"egress", req.Egress,
+		"route", req.Route,
+		"e2e_required", req.E2ERequired,
+		"e2e_route", req.E2ERoute,
+	)
+}
+
+func (rt *serverRuntime) handlePlaintextServiceStream(svc config.ServiceConfig, stream *quic.Stream, logger *slog.Logger) {
 	targetConn, err := dialTCP(rt.ctx, svc.Target)
 	if err != nil {
 		logger.Error("tcp target dial failed", "target", svc.Target, "response_code", protocol.ConnectCodeTargetDialFailed.String(), "error", err)
@@ -133,21 +163,49 @@ func (rt *serverRuntime) handleStream(peerID string, stream *quic.Stream) {
 	}
 
 	logger.Info("tcp target connected", "target", svc.Target, "response_code", protocol.ConnectCodeOK.String())
-
 	proxyTCP(stream, targetConn)
-
 	logger.Info("tcp proxy closed", "target", svc.Target)
 }
 
-func (rt *serverRuntime) requestLogger(peerID string, req protocol.ConnectRequest) *slog.Logger {
-	return rt.logger.With(
-		"peer_id", peerID,
-		"request_id", req.RequestID,
-		"protocol", req.Protocol,
-		"service", req.Service,
-		"egress", req.Egress,
-		"route", req.Route,
-	)
+func (rt *serverRuntime) handleE2EStream(req protocol.ConnectRequest, stream *quic.Stream, logger *slog.Logger) {
+	svc, err := findService(rt.cfg, req.Protocol, req.Service)
+	if err != nil {
+		code := serviceErrorCode(err)
+		logger.Warn("service denied", "response_code", code.String(), "error", err)
+		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: code, Message: err.Error()})
+		_ = stream.Close()
+		return
+	}
+	if !isServiceE2EConfigured(svc) {
+		err := fmt.Errorf("service %q is not configured for e2e", req.Service)
+		logger.Warn("service e2e unavailable", "response_code", protocol.ConnectCodeAccessDenied.String(), "error", err)
+		_ = protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeAccessDenied, Message: err.Error()})
+		_ = stream.Close()
+		return
+	}
+	if err := protocol.WriteConnectResponse(stream, protocol.ConnectResponse{OK: true}); err != nil {
+		logger.Error("write connect e2e response failed", "target", svc.Target, "response_code", protocol.ConnectCodeOK.String(), "error", err)
+		_ = stream.Close()
+		return
+	}
+	handshake, err := rt.e2e.runHandshake(stream, req, svc, logger)
+	if err != nil {
+		logger.Warn("e2e handshake failed", "error", err)
+		writeE2ECloseError(stream, err)
+		_ = stream.Close()
+		return
+	}
+	targetConn, err := dialTCP(rt.ctx, svc.Target)
+	if err != nil {
+		logger.Error("tcp target dial failed", "target", svc.Target, "error", err)
+		writeE2ECloseError(stream, err)
+		_ = stream.Close()
+		return
+	}
+	defer targetConn.Close()
+	logger.Info("tcp target connected", "target", svc.Target, "response_code", protocol.ConnectCodeOK.String(), "original_client_id", handshake.clientID)
+	proxyEncryptedTCP(stream, handshake.reader, handshake.writer, targetConn)
+	logger.Info("e2e tcp proxy closed", "target", svc.Target, "original_client_id", handshake.clientID)
 }
 
 func (rt *serverRuntime) handleRelayStream(req protocol.ConnectRequest, inbound *quic.Stream, logger *slog.Logger) {

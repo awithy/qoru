@@ -52,14 +52,14 @@ Completed:
 - service identity config, cert parsing/verification helpers, and dev service cert generation
 - protocol frame scaffolding for E2E hello/data/close frames
 
-Not implemented yet:
+Implemented now:
 
-- runtime E2E negotiation
+- runtime required-E2E negotiation through forward `e2e: off|auto|always` / `ConnectRequest.E2ERequired`
 - authenticated E2E handshake
-- encrypted payload proxying
-- E2E policy enforcement
+- encrypted payload proxying with E2E data frames
+- E2E policy enforcement for configured services
 
-Next slice: authenticated E2E handshake without encrypted payload.
+Next slice: broader E2E hardening, multi-hop smoke coverage, and operational polish.
 
 ## Slice 1: Static Route-Candidate Config
 
@@ -160,7 +160,7 @@ This can be tuned later if needed.
 
 ## Slice 4: Service Identity Certificate Plumbing
 
-Status: implemented for config loading/validation, identity helpers, and development service certificate generation. Runtime handshake use is not implemented yet.
+Status: implemented for config loading/validation, identity helpers, development service certificate generation, and required-E2E runtime use.
 
 Add service identity configuration and certificate helpers, without encrypting payload yet.
 
@@ -202,7 +202,7 @@ Each cert should have its own private key.
 
 ## Slice 5: Protocol Frame Scaffolding for E2E
 
-Status: implemented in the protocol package. Runtime negotiation/handshake use is not implemented yet.
+Status: implemented in the protocol package and used by required-E2E runtime streams.
 
 Make the stream capable of carrying framed post-connect E2E messages.
 
@@ -224,11 +224,11 @@ ConnectRequest.E2ERequired = true
 
 The current binary `ConnectRequest` format is fixed, so this may require a protocol bump or a new connect-request type. Since qoru is experimental, prefer clean protocol evolution over compatibility workarounds.
 
-## Slice 6: Authenticated E2E Handshake Without Encrypted Payload
+## Slice 6: Authenticated E2E Handshake
 
-Status: in progress. Protocol support for `E2EClientFinished` and an in-memory `internal/e2e` handshake core are implemented. Runtime wiring is next.
+Status: implemented for required-E2E TCP streams. qoru does not support a runtime mode that performs the E2E handshake and then carries plaintext payload.
 
-Implement the E2E identity handshake first, but temporarily continue proxying plaintext afterward.
+Implement the E2E identity handshake before encrypted payload proxying.
 
 Goals:
 
@@ -265,7 +265,7 @@ Implemented core pieces:
 
 ## Slice 7: Encrypted Data Frames
 
-Status: in progress. The in-memory encrypted record reader/writer is implemented and tested. Runtime wiring is not implemented yet.
+Status: implemented for required-E2E TCP streams.
 
 Replace raw post-connect TCP bytes with encrypted payload frames.
 
@@ -307,25 +307,33 @@ Open design items:
 
 ## Slice 8: Require and Enforce E2E Policy
 
-Status: not started.
+Status: implemented for services configured with `services[].e2e` and forwards configured with `e2e: auto` or `e2e: always`.
 
 Once encrypted payload frames work, add policy controls.
 
-Possible forward-side config:
+Forward-side config:
 
 ```yaml
 forwards:
   - protocol: tcp
     listen: 127.0.0.1:15432
     service: echo
-    require_e2e: true
+    e2e: auto
 ```
 
-Possible service-side behavior:
+Modes:
 
-- if a service has `e2e` configured, require the E2E handshake
-- final service authorization uses original client identity from the E2E handshake
-- target dialing happens only after successful E2E authentication and authorization
+- `off` or omitted: do not use E2E frames
+- `auto`: use E2E only when the selected route has an intermediary relay (`len(route) > 1`)
+- `always`: use E2E for direct and relayed routes
+
+Service-side behavior:
+
+- if a request has `E2ERequired`, the selected service must have `services[].e2e` configured
+- if a relayed/routed request does not have `E2ERequired` and the selected service has `services[].e2e`, reject plaintext
+- direct one-hop plaintext remains allowed for E2E-capable services so `e2e: auto` can skip redundant frame encryption
+- final E2E service authorization uses original client identity from the E2E handshake
+- target dialing for E2E streams happens only after successful E2E authentication and authorization
 
 This separates policy cleanly:
 

@@ -21,8 +21,8 @@ func TestRouteResolverSelectsStaticCandidates(t *testing.T) {
 
 	candidates := resolver.resolveCandidates(config.ForwardConfig{Protocol: "tcp", Service: "echo"})
 	assertRouteCandidates(t, candidates,
-		selectedRoute{service: "echo", egress: "relay-b", route: []string{"relay-a", "relay-b"}},
-		selectedRoute{service: "echo", egress: "relay-c", route: []string{"relay-a", "relay-c"}},
+		selectedRoute{service: "echo", egress: "relay-b", route: []string{"relay-a", "relay-b"}, e2eMode: config.ForwardE2EOff},
+		selectedRoute{service: "echo", egress: "relay-c", route: []string{"relay-a", "relay-c"}, e2eMode: config.ForwardE2EOff},
 	)
 }
 
@@ -34,7 +34,7 @@ func TestRouteResolverExplicitRouteWinsOverStaticRoute(t *testing.T) {
 	}}})
 
 	candidates := resolver.resolveCandidates(config.ForwardConfig{Protocol: "tcp", Service: "echo", Egress: "relay-d", Route: []string{"relay-a", "relay-d"}})
-	assertRouteCandidates(t, candidates, selectedRoute{service: "echo", egress: "relay-d", route: []string{"relay-a", "relay-d"}})
+	assertRouteCandidates(t, candidates, selectedRoute{service: "echo", egress: "relay-d", route: []string{"relay-a", "relay-d"}, e2eMode: config.ForwardE2EOff})
 }
 
 func TestRouteResolverExplicitEgressWinsOverStaticRoute(t *testing.T) {
@@ -45,7 +45,7 @@ func TestRouteResolverExplicitEgressWinsOverStaticRoute(t *testing.T) {
 	}}})
 
 	candidates := resolver.resolveCandidates(config.ForwardConfig{Protocol: "tcp", Service: "echo", Egress: "server-1"})
-	assertRouteCandidates(t, candidates, selectedRoute{service: "echo", egress: "server-1"})
+	assertRouteCandidates(t, candidates, selectedRoute{service: "echo", egress: "server-1", e2eMode: config.ForwardE2EOff})
 }
 
 func TestRouteResolverFallsBackToForwardWhenNoStaticRouteMatches(t *testing.T) {
@@ -56,7 +56,28 @@ func TestRouteResolverFallsBackToForwardWhenNoStaticRouteMatches(t *testing.T) {
 	}}})
 
 	candidates := resolver.resolveCandidates(config.ForwardConfig{Protocol: "tcp", Service: "echo-a"})
-	assertRouteCandidates(t, candidates, selectedRoute{service: "echo-a"})
+	assertRouteCandidates(t, candidates, selectedRoute{service: "echo-a", e2eMode: config.ForwardE2EOff})
+}
+
+func TestSelectedRouteEffectiveE2ERequired(t *testing.T) {
+	cases := []struct {
+		name  string
+		route selectedRoute
+		want  bool
+	}{
+		{name: "off relayed", route: selectedRoute{e2eMode: config.ForwardE2EOff, route: []string{"relay-a", "relay-b"}}, want: false},
+		{name: "auto direct no route", route: selectedRoute{e2eMode: config.ForwardE2EAuto}, want: false},
+		{name: "auto direct one-hop route", route: selectedRoute{e2eMode: config.ForwardE2EAuto, route: []string{"server-1"}}, want: false},
+		{name: "auto relayed", route: selectedRoute{e2eMode: config.ForwardE2EAuto, route: []string{"relay-a", "relay-b"}}, want: true},
+		{name: "always direct", route: selectedRoute{e2eMode: config.ForwardE2EAlways}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.route.effectiveE2ERequired(); got != tc.want {
+				t.Fatalf("expected %v, got %v", tc.want, got)
+			}
+		})
+	}
 }
 
 func TestIsRetryableSetupError(t *testing.T) {

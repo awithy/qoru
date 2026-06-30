@@ -25,6 +25,7 @@ forwards:
     listen: 127.0.0.1:15432
     service: echo
     egress: server-1
+    e2e: auto
     route:
       - server-1
 routes:
@@ -44,7 +45,7 @@ routes:
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if cfg.NodeID != "client-1" || cfg.ServiceIdentity.CA != "service-ca.crt" || len(cfg.Servers) != 1 || len(cfg.Forwards) != 1 || cfg.Forwards[0].Service != "echo" || len(cfg.Forwards[0].Route) != 1 || cfg.Forwards[0].Route[0] != "server-1" {
+	if cfg.NodeID != "client-1" || cfg.ServiceIdentity.CA != "service-ca.crt" || len(cfg.Servers) != 1 || len(cfg.Forwards) != 1 || cfg.Forwards[0].Service != "echo" || cfg.Forwards[0].E2E != ForwardE2EAuto || len(cfg.Forwards[0].Route) != 1 || cfg.Forwards[0].Route[0] != "server-1" {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 	if len(cfg.Routes) != 1 || cfg.Routes[0].Selection != RouteSelectionOrdered || len(cfg.Routes[0].Candidates) != 1 || cfg.Routes[0].Candidates[0].Egress != "server-1" {

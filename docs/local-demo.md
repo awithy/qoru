@@ -6,7 +6,7 @@ The simplest demo runs a one-hop TCP proxy locally:
 TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP echo target
 ```
 
-Additional smoke tests exercise explicit two-hop and three-hop relay routes.
+Additional smoke tests exercise explicit two-hop and three-hop relay routes, plus E2E policy/encryption behavior.
 
 ## Automated end-to-end checks
 
@@ -16,9 +16,15 @@ Run the local smoke tests:
 make demo-e2e
 make demo-multihop
 make demo-threehop
+make demo-e2e-auto-direct
+make demo-e2e-encrypted
 ```
 
 `demo-e2e` starts an echo target, qoru server, and qoru client; sends a test payload through the local client listener; verifies the echoed response; then cleans up. The generated temporary server config exposes an `echo` service for `client-1`.
+
+`demo-e2e-auto-direct` configures an E2E-capable service and a client forward with `e2e: auto` on a direct one-hop path. It verifies the payload succeeds and that no E2E handshake is run for the direct path.
+
+`demo-e2e-encrypted` configures an E2E-capable service behind a two-hop route and a client forward with `e2e: auto`. It verifies the payload succeeds and that both ingress and egress log a completed E2E handshake.
 
 By default, the scripts choose free local ports. The one-hop script addresses can be overridden with `QORU_DEMO_SERVER_ADDR`, `QORU_DEMO_CLIENT_ADDR`, and `QORU_DEMO_TARGET_ADDR`.
 

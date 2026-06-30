@@ -74,13 +74,17 @@ func ConnectToServer(ctx context.Context, nodeID string, identityCfg config.Iden
 	return conn, nil
 }
 
-func OpenTCPStream(ctx context.Context, conn *quic.Conn, requestID, service, egress string, route []string) (*quic.Stream, error) {
+func OpenTCPStream(ctx context.Context, conn *quic.Conn, requestID, service, egress string, route []string, e2eRequired bool) (*quic.Stream, error) {
 	stream, err := conn.OpenStreamSync(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := protocol.WriteConnectRequest(stream, protocol.ConnectRequest{RequestID: requestID, Protocol: "tcp", Service: service, Egress: egress, Route: route}); err != nil {
+	req := protocol.ConnectRequest{RequestID: requestID, Protocol: "tcp", Service: service, Egress: egress, Route: route, E2ERequired: e2eRequired}
+	if e2eRequired {
+		req.E2ERoute = append([]string(nil), route...)
+	}
+	if err := protocol.WriteConnectRequest(stream, req); err != nil {
 		_ = stream.Close()
 		return nil, err
 	}

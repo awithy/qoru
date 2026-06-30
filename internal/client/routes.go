@@ -6,6 +6,7 @@ type selectedRoute struct {
 	service string
 	egress  string
 	route   []string
+	e2eMode string
 }
 
 type routeResolver struct {
@@ -26,7 +27,7 @@ func newRouteResolver(cfg *config.Config) *routeResolver {
 }
 
 func (r *routeResolver) resolveCandidates(forward config.ForwardConfig) []selectedRoute {
-	selected := selectedRoute{service: forward.Service, egress: forward.Egress, route: copyRoute(forward.Route)}
+	selected := selectedRoute{service: forward.Service, egress: forward.Egress, route: copyRoute(forward.Route), e2eMode: normalizedForwardE2E(forward.E2E)}
 	if len(forward.Route) > 0 || forward.Egress != "" || r == nil {
 		return []selectedRoute{selected}
 	}
@@ -38,9 +39,27 @@ func (r *routeResolver) resolveCandidates(forward config.ForwardConfig) []select
 
 	candidates := make([]selectedRoute, 0, len(serviceRoute.Candidates))
 	for _, candidate := range serviceRoute.Candidates {
-		candidates = append(candidates, selectedRoute{service: forward.Service, egress: candidate.Egress, route: copyRoute(candidate.Route)})
+		candidates = append(candidates, selectedRoute{service: forward.Service, egress: candidate.Egress, route: copyRoute(candidate.Route), e2eMode: normalizedForwardE2E(forward.E2E)})
 	}
 	return candidates
+}
+
+func normalizedForwardE2E(mode string) string {
+	if mode == "" {
+		return config.ForwardE2EOff
+	}
+	return mode
+}
+
+func (r selectedRoute) effectiveE2ERequired() bool {
+	switch r.e2eMode {
+	case config.ForwardE2EAlways:
+		return true
+	case config.ForwardE2EAuto:
+		return len(r.route) > 1
+	default:
+		return false
+	}
 }
 
 func copyRoute(route []string) []string {

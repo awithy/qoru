@@ -37,14 +37,15 @@ Implemented today:
 - `ConnectResponse` success/failure handshake before raw TCP proxying begins.
 - Half-close-aware bidirectional byte proxying between local TCP, QUIC streams, and server-side TCP targets.
 - Service identity config, service certificate verification helpers, and development service certificate generation.
-- Protocol frame scaffolding for future E2E hello, encrypted data, and close frames.
+- Protocol frame scaffolding for E2E hello, encrypted data, and close frames.
+- Runtime required E2E mode for TCP forwards and services using service identity certificates.
+- Authenticated E2E handshake with client node proof, egress service proof, and encrypted payload records.
 
 Not implemented yet:
 
 - resuming active proxied TCP connections across upstream QUIC reconnects
 - dynamic topology/service advertisement
-- authenticated E2E handshake and runtime negotiation
-- end-to-end encrypted payload frames
+- optional/non-required E2E negotiation
 - UDP forwarding
 
 ## CLI Shape
@@ -228,7 +229,7 @@ forwards:
     egress: server-1
 ```
 
-The client requests a named service. Service names are currently resolved on the selected direct upstream server for one-hop requests, or on the final route hop for explicit-route requests. `egress` is optional when exactly one upstream server is configured and no explicit route is used; empty means that server may satisfy the request. When multiple upstream servers are configured and no explicit route is used, each forward must set `egress` to one configured server ID. For explicit routes, the first route hop selects the direct upstream server, and `egress`, if set, must match the final route hop.
+The client requests a named service. Service names are currently resolved on the selected direct upstream server for one-hop requests, or on the final route hop for explicit-route requests. `egress` is optional when exactly one upstream server is configured and no explicit route is used; empty means that server may satisfy the request. When multiple upstream servers are configured and no explicit route is used, each forward must set `egress` to one configured server ID. For explicit routes, the first route hop selects the direct upstream server, and `egress`, if set, must match the final route hop. A forward may set `e2e: off|auto|always`; `auto` requires E2E only when the selected route has an intermediary relay (`len(route) > 1`), while `always` requires E2E even for direct one-hop traffic.
 
 Static service route candidate configuration is implemented in config loading, validation, and basic client runtime resolution. For `selection: ordered`, the client tries matching route candidates in order. If stream setup fails before payload proxying begins with a retryable setup error, the client tries the next candidate. Candidate fallback does not happen after payload proxying begins. Non-ordered selection policies are planned later.
 
@@ -253,7 +254,7 @@ Relay authorization is explicit:
 - when a routed request reaches its egress node (`len(route) == 1`), the authenticated previous-hop relay must be listed in top-level `peers`
 - final local service access is checked separately with `services[].peers`
 
-If more hops remain, the relay opens a stream to `route[1]`, forwards the request with the current hop removed, and proxies stream bytes. The first multi-hop implementation uses hop-by-hop QUIC/mTLS only; intermediary relays can observe raw proxied bytes until end-to-end payload encryption is added.
+If more hops remain, the relay opens a stream to `route[1]`, forwards the request with the current hop removed, and proxies stream bytes. For plaintext requests, intermediary relays can observe raw proxied bytes. For `E2ERequired` requests, relays only observe opaque E2E handshake/data/close frames after setup.
 
 A client may configure multiple direct upstream servers:
 
@@ -361,6 +362,7 @@ Client required fields:
 - each `servers[]` entry requires `id` and `address`
 - at least one `forwards` entry
 - each forward requires `protocol: tcp`, `listen`, and `service`; `egress` is optional with one upstream server and required with multiple upstream servers
+- `forwards[].e2e` may be omitted or set to `off`, `auto`, or `always`; `auto`/`always` require `service_identity.ca`
 - `route` is optional; when set, it must be non-empty and contain no empty hops
 - route length is capped at `3` hops for the first multi-hop implementation
 - the first route hop must match a configured direct upstream server
@@ -380,7 +382,7 @@ Server service and relay fields:
 - `services`: named protocol-aware services this server can provide. Each service has `name`, `protocol`, `target`, optional `peers`, and optional `e2e`. If `peers` is omitted or empty, any authenticated peer may use that service.
 - `peers`: optional configured relay peers. Each peer has `id`, optional `address`, and optional `dial`. Conceptually, `peers` represents allowed overlay neighbors. `dial: true` means this node should initiate/maintain an outbound connection to that peer; `address` is required when `dial: true`. `dial: false` or omitted means the peer relationship may be inbound-only. Routed egress requests require the previous-hop relay to be listed here.
 - `allowed_relay_clients`: optional list of authenticated node IDs allowed to use this node as an intermediate relay. A routed request with more than one remaining hop is rejected unless the previous hop appears in this list. If omitted or empty, any authenticated node may use this server as an intermediate relay.
-- `services[].e2e`: optional service identity certificate/key configuration for future E2E handshakes. When set, both `cert` and `key` are required, `service_identity.ca` is required, and the service protocol must currently be `tcp`. This configuration is loaded and validated but is not used by the runtime handshake yet.
+- `services[].e2e`: optional service identity certificate/key configuration for required E2E mode. When set, both `cert` and `key` are required, `service_identity.ca` is required, and the service protocol must currently be `tcp`. Plaintext routed requests to a service configured with `e2e` are rejected; direct one-hop plaintext is allowed so forward `e2e: auto` can avoid redundant frame encryption.
 
 ## TLS and Identity
 
@@ -471,7 +473,7 @@ A future encrypted stream shape may be:
 ...
 ```
 
-The exact ordering of `ConnectResponse` relative to the E2E handshake, whether handshake material is carried in existing response frames or new frame types, AEAD choice, key schedule, and close/error semantics are still open design items. In encrypted mode, final service authorization and target dialing should happen only after the egress authenticates the original ingress client.
+Runtime required-E2E stream shape is `ConnectRequest{E2ERequired}`, `ConnectResponse OK`, `E2EClientHello`, `E2EServerHello`, `E2EClientFinished`, then encrypted `E2EData` records and `E2EClose`. In encrypted mode, final service authorization and target dialing happen only after the egress authenticates the original ingress client.
 
 ## ALPN
 
@@ -532,9 +534,14 @@ route_count  uint8
 repeated route_count times:
   hop_len    uint16 big endian
   hop        []byte
+e2e_required uint8 // 0 = false, 1 = true
+e2e_route_count uint8
+repeated e2e_route_count times:
+  hop_len    uint16 big endian
+  hop        []byte
 ```
 
-`route` carries the remaining explicit path beginning with the node currently receiving the request. A relay forwards with the current hop removed, so `[relay-a, relay-b]` becomes `[relay-b]` when `relay-a` forwards to `relay-b`.
+`route` carries the remaining explicit path beginning with the node currently receiving the request. A relay forwards with the current hop removed, so `[relay-a, relay-b]` becomes `[relay-b]` when `relay-a` forwards to `relay-b`. For E2E requests, `e2e_route` carries the original selected route for transcript binding and is forwarded unchanged by relays.
 
 ### `ConnectResponse`
 
@@ -563,11 +570,11 @@ Current response codes:
 8 INTERNAL_ERROR
 ```
 
-If status is OK, code must be `OK` and both sides hand the stream over to raw TCP proxying. If status is error, code identifies the failure class and message provides human-readable detail.
+If status is OK, code must be `OK`. For plaintext requests, both sides hand the stream over to raw TCP proxying. For E2E-required requests, both sides run the E2E handshake and then exchange only encrypted E2E frames. If status is error, code identifies the failure class and message provides human-readable detail.
 
 ### E2E scaffolding frames
 
-The protocol package includes frame encoders/decoders for future E2E handshakes and encrypted payloads. These frames are not used by the runtime yet.
+The protocol package includes frame encoders/decoders for E2E handshakes and encrypted payloads. Required E2E runtime mode uses these frames after a successful `ConnectResponse`.
 
 `E2EClientHello` payload:
 
@@ -621,7 +628,7 @@ MaxE2EFinishedSignatureLength = 8192
 MaxE2ENonceSuffixLength       = 24
 ```
 
-The handshake core uses X25519 ephemeral keys, certificate signatures, a transcript bound to `request_id`, `service`, `egress`, `route`, and both ephemeral keys, plus HKDF-derived directional traffic keys. The encrypted record-layer helper uses AES-GCM, directional keys, 8-byte big-endian sequence nonce suffixes, strict in-order sequence checks, transcript-bound associated data, and `E2EClose` for encrypted-mode EOF signaling. Runtime negotiation, runtime half-close integration, close-code policy, and integration with `ConnectRequest` negotiation are still open design items.
+The handshake core uses X25519 ephemeral keys, certificate signatures, a transcript bound to `request_id`, `service`, `egress`, original `e2e_route`, and both ephemeral keys, plus HKDF-derived directional traffic keys. The encrypted record-layer helper uses AES-GCM, directional keys, 8-byte big-endian sequence nonce suffixes, strict in-order sequence checks, transcript-bound associated data, and `E2EClose` for encrypted-mode EOF signaling. Runtime E2E mode is explicit via `ConnectRequest.E2ERequired`, driven by forward `e2e` policy. Broader negotiation, richer close-code policy, and operational hardening remain open design items.
 
 Current TCP stream model:
 
@@ -635,7 +642,7 @@ The setup/control phase is framed. Once the server confirms success, the remaini
 
 TCP proxying is half-close-aware. When one copy direction reaches EOF, qoru gracefully closes only the opposite write side and lets the other direction continue so request-then-half-close protocols can still receive responses. Unexpected copy or half-close errors abort both endpoints to unblock the paired copy direction.
 
-Future multi-hop/end-to-end encryption will require framed encrypted data messages after an E2E service-identity handshake. The current runtime keeps raw bytes after the initial setup handshake because E2E runtime negotiation is not wired yet; when E2E runtime support is added, qoru should not support a mode that performs the E2E handshake and then carries plaintext application payload.
+Required E2E runtime mode uses framed encrypted data messages after an E2E service-identity handshake. qoru does not support a mode that performs the E2E handshake and then carries plaintext application payload.
 
 ## Timeouts and Reconnect Backoff
 
@@ -870,10 +877,13 @@ Completed in the current service/E2E track:
 3. Ordered setup-time candidate fallback.
 4. Service identity certificates using SPIFFE-style service URI SANs such as `spiffe://qoru/service/echo`.
 5. Protocol frame scaffolding for E2E hello, encrypted data, and close frames.
+6. Runtime required-E2E negotiation via forward `e2e` policy / `ConnectRequest.E2ERequired`.
+7. Authenticated E2E handshake where the egress proves service identity and the ingress proves original client identity.
+8. Encrypted framed payload records between ingress and egress.
+9. E2E policy enforcement: services with `services[].e2e` reject routed plaintext requests.
 
 Next:
 
-1. Add runtime E2E negotiation and an authenticated E2E handshake where the egress proves service identity with its own service cert/key and the ingress proves original client identity.
-2. Replace raw post-connect TCP bytes with encrypted framed payload records between ingress and egress.
-3. Add E2E policy enforcement, such as requiring E2E for services with `services[].e2e`.
-4. Later: dynamic service advertisement/topology, richer health-aware route selection, non-ordered candidate selection policies, and UDP support.
+1. Add broader E2E smoke/demo coverage and improve runtime diagnostics.
+2. Harden close/error semantics and observability for encrypted streams.
+3. Later: dynamic service advertisement/topology, richer health-aware route selection, non-ordered candidate selection policies, and UDP support.

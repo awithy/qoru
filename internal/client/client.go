@@ -52,6 +52,10 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 		return err
 	}
 	routes := newRouteResolver(cfg)
+	e2eRuntime, err := newE2EClientRuntime(cfg)
+	if err != nil {
+		return err
+	}
 
 	listeners := make([]forwardListener, 0, len(cfg.Forwards))
 	for _, forward := range cfg.Forwards {
@@ -70,7 +74,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 		acceptWG.Add(1)
 		go func(item forwardListener) {
 			defer acceptWG.Done()
-			acceptForward(ctx, sessions, routes, item.forward, item.listener, logger, errCh, &handlerWG)
+			acceptForward(ctx, sessions, routes, e2eRuntime, item.forward, item.listener, logger, errCh, &handlerWG)
 		}(item)
 	}
 
@@ -114,7 +118,7 @@ func closeListeners(listeners []forwardListener) {
 	}
 }
 
-func acceptForward(ctx context.Context, session upstreamSession, routes *routeResolver, forward config.ForwardConfig, listener net.Listener, logger *slog.Logger, errCh chan<- error, handlerWG *sync.WaitGroup) {
+func acceptForward(ctx context.Context, session upstreamSession, routes *routeResolver, e2eRuntime *e2eClientRuntime, forward config.ForwardConfig, listener net.Listener, logger *slog.Logger, errCh chan<- error, handlerWG *sync.WaitGroup) {
 	for {
 		localConn, err := listener.Accept()
 		if err != nil {
@@ -128,7 +132,7 @@ func acceptForward(ctx context.Context, session upstreamSession, routes *routeRe
 		handlerWG.Add(1)
 		go func() {
 			defer handlerWG.Done()
-			handleLocalConnection(ctx, session, candidates, localConn, logger)
+			handleLocalConnection(ctx, session, e2eRuntime, candidates, localConn, logger)
 		}()
 	}
 }
@@ -148,7 +152,7 @@ func waitGroupTimeout(wg *sync.WaitGroup, timeout time.Duration) error {
 	}
 }
 
-func handleLocalConnection(ctx context.Context, session upstreamSession, candidates []selectedRoute, localConn net.Conn, logger *slog.Logger) {
+func handleLocalConnection(ctx context.Context, session upstreamSession, e2eRuntime *e2eClientRuntime, candidates []selectedRoute, localConn net.Conn, logger *slog.Logger) {
 	logger = ensureLogger(logger)
 	defer localConn.Close()
 	if len(candidates) == 0 {
@@ -165,11 +169,22 @@ func handleLocalConnection(ctx context.Context, session upstreamSession, candida
 	logger.Info("local tcp connection accepted")
 
 	for i, candidate := range candidates {
-		candidateLogger := logger.With("service", candidate.service, "egress", candidate.egress, "route", candidate.route, "route_candidate", i+1)
-		stream, err := session.OpenTCPStream(ctx, requestID, candidate.service, candidate.egress, candidate.route)
+		e2eRequired := candidate.effectiveE2ERequired()
+		candidateLogger := logger.With("service", candidate.service, "egress", candidate.egress, "route", candidate.route, "route_candidate", i+1, "e2e", candidate.e2eMode, "e2e_required", e2eRequired)
+		stream, err := session.OpenTCPStream(ctx, requestID, candidate.service, candidate.egress, candidate.route, e2eRequired)
 		if err == nil {
 			candidateLogger.Info("tcp stream connected")
-			proxyTCP(localConn, stream)
+			if e2eRequired {
+				reader, writer, handshakeErr := e2eRuntime.runHandshake(stream, requestID, candidate, candidateLogger)
+				if handshakeErr != nil {
+					candidateLogger.Error("e2e handshake failed", "error", handshakeErr)
+					_ = stream.Close()
+					return
+				}
+				proxyEncryptedTCP(localConn, stream, reader, writer)
+			} else {
+				proxyTCP(localConn, stream)
+			}
 			candidateLogger.Info("local tcp proxy closed")
 			return
 		}

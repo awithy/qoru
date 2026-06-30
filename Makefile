@@ -1,4 +1,4 @@
-.PHONY: build test demo-e2e demo-multihop demo-threehop gen-dev-certs
+.PHONY: build test demo-e2e demo-multihop demo-threehop demo-e2e-encrypted demo-e2e-auto-direct gen-dev-certs
 
 build:
 	@mkdir -p build
@@ -15,6 +15,12 @@ demo-multihop:
 
 demo-threehop:
 	./dev/e2e-threehop.sh
+
+demo-e2e-encrypted:
+	./dev/e2e-encrypted-multihop.sh
+
+demo-e2e-auto-direct:
+	./dev/e2e-auto-direct.sh
 
 gen-dev-certs:
 	./dev/gen-certs.sh

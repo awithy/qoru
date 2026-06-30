@@ -5,6 +5,10 @@ import "os"
 const (
 	ModeClient = "client"
 	ModeServer = "server"
+
+	ForwardE2EOff    = "off"
+	ForwardE2EAuto   = "auto"
+	ForwardE2EAlways = "always"
 )
 
 var DefaultPaths = []string{
@@ -58,6 +62,7 @@ type ForwardConfig struct {
 	Service  string   `yaml:"service"`
 	Egress   string   `yaml:"egress,omitempty"`
 	Route    []string `yaml:"route,omitempty"`
+	E2E      string   `yaml:"e2e,omitempty"`
 }
 
 type ServiceRouteConfig struct {

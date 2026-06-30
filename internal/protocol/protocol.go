@@ -93,11 +93,13 @@ type Frame struct {
 }
 
 type ConnectRequest struct {
-	RequestID string
-	Protocol  string
-	Service   string
-	Egress    string
-	Route     []string
+	RequestID   string
+	Protocol    string
+	Service     string
+	Egress      string
+	Route       []string
+	E2ERequired bool
+	E2ERoute    []string
 }
 
 type ConnectResponse struct {
@@ -193,21 +195,16 @@ func WriteConnectRequest(w io.Writer, req ConnectRequest) error {
 	if len(req.Egress) > MaxTargetLength {
 		return fmt.Errorf("egress too long: %d > %d", len(req.Egress), MaxTargetLength)
 	}
-	if len(req.Route) > 255 {
-		return fmt.Errorf("route too long: %d > %d", len(req.Route), 255)
+	routeLen, err := encodedRouteLength(req.Route, "route")
+	if err != nil {
+		return err
 	}
-	routeLen := 1
-	for i, hop := range req.Route {
-		if hop == "" {
-			return fmt.Errorf("route[%d] is required", i)
-		}
-		if len(hop) > MaxTargetLength {
-			return fmt.Errorf("route[%d] too long: %d > %d", i, len(hop), MaxTargetLength)
-		}
-		routeLen += 2 + len(hop)
+	e2eRouteLen, err := encodedRouteLength(req.E2ERoute, "e2e_route")
+	if err != nil {
+		return err
 	}
 
-	payload := make([]byte, 16+1+len(req.Protocol)+2+len(req.Service)+2+len(req.Egress)+routeLen)
+	payload := make([]byte, 16+1+len(req.Protocol)+2+len(req.Service)+2+len(req.Egress)+routeLen+1+e2eRouteLen)
 	copy(payload[0:16], requestID[:])
 	offset := 16
 	payload[offset] = uint8(len(req.Protocol))
@@ -219,15 +216,67 @@ func WriteConnectRequest(w io.Writer, req ConnectRequest) error {
 	binary.BigEndian.PutUint16(payload[offset:offset+2], uint16(len(req.Egress)))
 	copy(payload[offset+2:], req.Egress)
 	offset += 2 + len(req.Egress)
-	payload[offset] = uint8(len(req.Route))
+	offset = writeRoute(payload, offset, req.Route)
+	if req.E2ERequired {
+		payload[offset] = 1
+	}
 	offset++
-	for _, hop := range req.Route {
+	writeRoute(payload, offset, req.E2ERoute)
+
+	return WriteFrame(w, TypeConnectRequest, payload)
+}
+
+func encodedRouteLength(route []string, label string) (int, error) {
+	if len(route) > 255 {
+		return 0, fmt.Errorf("%s too long: %d > %d", label, len(route), 255)
+	}
+	length := 1
+	for i, hop := range route {
+		if hop == "" {
+			return 0, fmt.Errorf("%s[%d] is required", label, i)
+		}
+		if len(hop) > MaxTargetLength {
+			return 0, fmt.Errorf("%s[%d] too long: %d > %d", label, i, len(hop), MaxTargetLength)
+		}
+		length += 2 + len(hop)
+	}
+	return length, nil
+}
+
+func writeRoute(payload []byte, offset int, route []string) int {
+	payload[offset] = uint8(len(route))
+	offset++
+	for _, hop := range route {
 		binary.BigEndian.PutUint16(payload[offset:offset+2], uint16(len(hop)))
 		copy(payload[offset+2:], hop)
 		offset += 2 + len(hop)
 	}
+	return offset
+}
 
-	return WriteFrame(w, TypeConnectRequest, payload)
+func readRoute(payload []byte, offset, routeCount int, label string) ([]string, int, error) {
+	var route []string
+	if routeCount > 0 {
+		route = make([]string, 0, routeCount)
+	}
+	for i := 0; i < routeCount; i++ {
+		if len(payload) < offset+2 {
+			return nil, offset, fmt.Errorf("malformed connect payload: missing %s[%d] length", label, i)
+		}
+		hopLen := int(binary.BigEndian.Uint16(payload[offset : offset+2]))
+		if hopLen == 0 {
+			return nil, offset, fmt.Errorf("%s[%d] is required", label, i)
+		}
+		if hopLen > MaxTargetLength {
+			return nil, offset, fmt.Errorf("%s[%d] too long: %d > %d", label, i, hopLen, MaxTargetLength)
+		}
+		if len(payload) < offset+2+hopLen {
+			return nil, offset, fmt.Errorf("malformed connect payload: %s[%d] length mismatch", label, i)
+		}
+		route = append(route, string(payload[offset+2:offset+2+hopLen]))
+		offset += 2 + hopLen
+	}
+	return route, offset, nil
 }
 
 func ReadConnectRequest(r io.Reader) (ConnectRequest, error) {
@@ -283,32 +332,36 @@ func ReadConnectRequest(r io.Reader) (ConnectRequest, error) {
 	offset += 2 + egressLen
 	routeCount := int(frame.Payload[offset])
 	offset++
-	var route []string
-	if routeCount > 0 {
-		route = make([]string, 0, routeCount)
+	route, offset, err := readRoute(frame.Payload, offset, routeCount, "route")
+	if err != nil {
+		return ConnectRequest{}, err
 	}
-	for i := 0; i < routeCount; i++ {
-		if len(frame.Payload) < offset+2 {
-			return ConnectRequest{}, fmt.Errorf("malformed connect payload: missing route[%d] length", i)
+	e2eRequired := false
+	if len(frame.Payload[offset:]) >= 1 {
+		switch frame.Payload[offset] {
+		case 0:
+			e2eRequired = false
+		case 1:
+			e2eRequired = true
+		default:
+			return ConnectRequest{}, fmt.Errorf("malformed connect payload: invalid e2e_required value %d", frame.Payload[offset])
 		}
-		hopLen := int(binary.BigEndian.Uint16(frame.Payload[offset : offset+2]))
-		if hopLen == 0 {
-			return ConnectRequest{}, fmt.Errorf("route[%d] is required", i)
+		offset++
+	}
+	var e2eRoute []string
+	if len(frame.Payload[offset:]) > 0 {
+		e2eRouteCount := int(frame.Payload[offset])
+		offset++
+		e2eRoute, offset, err = readRoute(frame.Payload, offset, e2eRouteCount, "e2e_route")
+		if err != nil {
+			return ConnectRequest{}, err
 		}
-		if hopLen > MaxTargetLength {
-			return ConnectRequest{}, fmt.Errorf("route[%d] too long: %d > %d", i, hopLen, MaxTargetLength)
-		}
-		if len(frame.Payload) < offset+2+hopLen {
-			return ConnectRequest{}, fmt.Errorf("malformed connect payload: route[%d] length mismatch", i)
-		}
-		route = append(route, string(frame.Payload[offset+2:offset+2+hopLen]))
-		offset += 2 + hopLen
 	}
 	if len(frame.Payload[offset:]) != 0 {
 		return ConnectRequest{}, fmt.Errorf("malformed connect payload: trailing bytes")
 	}
 
-	return ConnectRequest{RequestID: requestID, Protocol: protocol, Service: service, Egress: egress, Route: route}, nil
+	return ConnectRequest{RequestID: requestID, Protocol: protocol, Service: service, Egress: egress, Route: route, E2ERequired: e2eRequired, E2ERoute: e2eRoute}, nil
 }
 
 func WriteConnectResponse(w io.Writer, resp ConnectResponse) error {

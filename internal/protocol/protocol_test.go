@@ -13,7 +13,7 @@ const testRequestID = "018ff6f2-5c7b-7d4a-b7f1-9c0e6e7a1234"
 
 func TestConnectRequestRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
-	want := ConnectRequest{RequestID: testRequestID, Protocol: "tcp", Service: "echo", Egress: "server-1", Route: []string{"server-1"}}
+	want := ConnectRequest{RequestID: testRequestID, Protocol: "tcp", Service: "echo", Egress: "server-1", Route: []string{"server-1"}, E2ERequired: true, E2ERoute: []string{"relay-a", "server-1"}}
 
 	if err := WriteConnectRequest(&buf, want); err != nil {
 		t.Fatalf("WriteConnectRequest returned error: %v", err)
@@ -23,8 +23,55 @@ func TestConnectRequestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadConnectRequest returned error: %v", err)
 	}
-	if got.RequestID != want.RequestID || got.Protocol != want.Protocol || got.Service != want.Service || got.Egress != want.Egress || strings.Join(got.Route, ",") != strings.Join(want.Route, ",") {
+	if got.RequestID != want.RequestID || got.Protocol != want.Protocol || got.Service != want.Service || got.Egress != want.Egress || strings.Join(got.Route, ",") != strings.Join(want.Route, ",") || got.E2ERequired != want.E2ERequired || strings.Join(got.E2ERoute, ",") != strings.Join(want.E2ERoute, ",") {
 		t.Fatalf("expected %#v, got %#v", want, got)
+	}
+}
+
+func TestReadConnectRequestAcceptsLegacyPayloadWithoutE2EFields(t *testing.T) {
+	var encoded bytes.Buffer
+	want := ConnectRequest{RequestID: testRequestID, Protocol: "tcp", Service: "echo", Egress: "server-1", Route: []string{"server-1"}}
+	if err := WriteConnectRequest(&encoded, want); err != nil {
+		t.Fatalf("WriteConnectRequest returned error: %v", err)
+	}
+	frame, err := ReadFrame(&encoded)
+	if err != nil {
+		t.Fatalf("ReadFrame returned error: %v", err)
+	}
+	if len(frame.Payload) < 2 {
+		t.Fatalf("encoded payload unexpectedly short: %d", len(frame.Payload))
+	}
+
+	var legacy bytes.Buffer
+	if err := WriteFrame(&legacy, TypeConnectRequest, frame.Payload[:len(frame.Payload)-2]); err != nil {
+		t.Fatalf("WriteFrame returned error: %v", err)
+	}
+	got, err := ReadConnectRequest(&legacy)
+	if err != nil {
+		t.Fatalf("ReadConnectRequest returned error: %v", err)
+	}
+	if got.E2ERequired || len(got.E2ERoute) != 0 || got.RequestID != want.RequestID || strings.Join(got.Route, ",") != strings.Join(want.Route, ",") {
+		t.Fatalf("unexpected legacy connect request: %#v", got)
+	}
+}
+
+func TestReadConnectRequestRejectsInvalidE2ERequiredValue(t *testing.T) {
+	var encoded bytes.Buffer
+	if err := WriteConnectRequest(&encoded, ConnectRequest{RequestID: testRequestID, Protocol: "tcp", Service: "echo"}); err != nil {
+		t.Fatalf("WriteConnectRequest returned error: %v", err)
+	}
+	frame, err := ReadFrame(&encoded)
+	if err != nil {
+		t.Fatalf("ReadFrame returned error: %v", err)
+	}
+	frame.Payload[len(frame.Payload)-2] = 7
+
+	var malformed bytes.Buffer
+	if err := WriteFrame(&malformed, TypeConnectRequest, frame.Payload); err != nil {
+		t.Fatalf("WriteFrame returned error: %v", err)
+	}
+	if _, err := ReadConnectRequest(&malformed); err == nil {
+		t.Fatal("expected invalid e2e_required value to be rejected")
 	}
 }
 

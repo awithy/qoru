@@ -59,6 +59,9 @@ func ValidateClient(cfg *Config) error {
 		if fwd.Service == "" {
 			return fmt.Errorf("forwards[%d].service is required", i)
 		}
+		if err := validateForwardE2E(cfg, i, fwd); err != nil {
+			return err
+		}
 		if err := validateForwardRoute(i, fwd, servers); err != nil {
 			return err
 		}
@@ -79,6 +82,20 @@ func ValidateClient(cfg *Config) error {
 		}
 	}
 	return nil
+}
+
+func validateForwardE2E(cfg *Config, i int, fwd ForwardConfig) error {
+	switch fwd.E2E {
+	case "", ForwardE2EOff:
+		return nil
+	case ForwardE2EAuto, ForwardE2EAlways:
+		if cfg.ServiceIdentity.CA == "" {
+			return fmt.Errorf("service_identity.ca is required when forwards[%d].e2e is %q", i, fwd.E2E)
+		}
+		return nil
+	default:
+		return fmt.Errorf("forwards[%d].e2e must be one of %q, %q, or %q", i, ForwardE2EOff, ForwardE2EAuto, ForwardE2EAlways)
+	}
 }
 
 func hasServiceRoute(cfg *Config, protocol, service string) bool {

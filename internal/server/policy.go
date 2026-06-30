@@ -34,19 +34,33 @@ func requireConfiguredPeer(cfg *config.Config, peerID string) error {
 }
 
 func resolveService(cfg *config.Config, peerID, protocol, service string) (config.ServiceConfig, error) {
+	svc, err := findService(cfg, protocol, service)
+	if err != nil {
+		return config.ServiceConfig{}, err
+	}
+	if err := authorizeServicePeer(svc, peerID, protocol, service); err != nil {
+		return config.ServiceConfig{}, err
+	}
+	return svc, nil
+}
+
+func findService(cfg *config.Config, protocol, service string) (config.ServiceConfig, error) {
 	for _, svc := range cfg.Services {
-		if svc.Protocol != protocol || svc.Name != service {
-			continue
-		}
-		if len(svc.Peers) == 0 {
+		if svc.Protocol == protocol && svc.Name == service {
 			return svc, nil
 		}
-		for _, peer := range svc.Peers {
-			if peerID == peer {
-				return svc, nil
-			}
-		}
-		return config.ServiceConfig{}, fmt.Errorf("%w: peer %q is not allowed to access %s service %q", ErrAccessDenied, peerID, protocol, service)
 	}
 	return config.ServiceConfig{}, fmt.Errorf("%w: %s service %q", ErrServiceNotFound, protocol, service)
+}
+
+func authorizeServicePeer(svc config.ServiceConfig, peerID, protocol, service string) error {
+	if len(svc.Peers) == 0 {
+		return nil
+	}
+	for _, peer := range svc.Peers {
+		if peerID == peer {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: peer %q is not allowed to access %s service %q", ErrAccessDenied, peerID, protocol, service)
 }

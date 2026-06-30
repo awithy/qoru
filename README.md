@@ -30,9 +30,10 @@ TCP client -> qoru client -> relay-a -> relay-b -> TCP target
 - Explicit-route multi-hop TCP forwarding using configured relay peers.
 - Startup dialing, inbound session registration, and connection reuse for configured relay peers.
 - Server-side TCP target dialing and half-close-aware byte proxying.
+- Optional required end-to-end encrypted TCP payload mode using service identity certificates.
 - SPIFFE-style URI SAN node identities in mTLS certificates.
 - Development certificate generation.
-- Local echo-server demos and automated one-hop, two-hop, and three-hop smoke tests.
+- Local echo-server demos and automated one-hop, two-hop, three-hop, and encrypted E2E smoke tests.
 
 ## Quick Start: Local Demo
 
@@ -42,6 +43,8 @@ Run the automated local smoke tests:
 make demo-e2e
 make demo-multihop
 make demo-threehop
+make demo-e2e-auto-direct
+make demo-e2e-encrypted
 ```
 
 Or run the one-hop demo manually.
@@ -138,6 +141,22 @@ forwards:
     egress: server-1
 ```
 
+A forward may also set end-to-end payload encryption policy for a service with a configured service identity certificate. Valid values are `off`, `auto`, and `always`; `auto` encrypts relayed routes and skips E2E frame encryption for direct one-hop traffic:
+
+```yaml
+service_identity:
+  ca: ./dev/certs/service-ca.crt
+
+forwards:
+  - protocol: tcp
+    listen: 127.0.0.1:15432
+    service: echo
+    egress: server-1
+    e2e: auto
+```
+
+When E2E is required by the selected forward/route, the egress service must configure `services[].e2e`. Plaintext routed requests to a service with `services[].e2e` are rejected.
+
 A forward may also include an explicit `route`. The first hop must be a configured direct upstream server, and the final hop is the egress node:
 
 ```yaml
@@ -151,7 +170,7 @@ forwards:
       - relay-b
 ```
 
-Explicit multi-hop routing currently supports routes up to three relay hops and uses hop-by-hop QUIC/mTLS. End-to-end payload encryption through intermediary relays is not implemented yet.
+Explicit multi-hop routing currently supports routes up to three relay hops and uses hop-by-hop QUIC/mTLS. For services configured with service identity certificates and client forwards with `e2e: auto` or `e2e: always`, relayed TCP payloads are encrypted end-to-end between ingress client and egress service node; intermediary relays only forward opaque E2E frames. `e2e: auto` skips E2E frame encryption for direct one-hop traffic.
 
 A client can configure multiple direct upstream servers. Without an explicit `route`, each forward must set `egress` to a configured server ID:
 
@@ -182,6 +201,23 @@ services:
     target: 127.0.0.1:9000
     peers:
       - client-1
+```
+
+E2E-enabled service:
+
+```yaml
+service_identity:
+  ca: ./dev/certs/service-ca.crt
+
+services:
+  - name: echo
+    protocol: tcp
+    target: 127.0.0.1:9000
+    peers:
+      - client-1
+    e2e:
+      cert: ./dev/certs/relay-b-echo.crt
+      key: ./dev/certs/relay-b-echo.key
 ```
 
 Relay peer config for explicit multi-hop forwarding:
@@ -253,7 +289,7 @@ Application payload encryption  = end-to-end, ingress -> egress
 QUIC mTLS                        = hop-by-hop, peer -> peer
 ```
 
-The current implementation has QUIC/mTLS hop-by-hop encryption and authentication. End-to-end application payload encryption for multi-hop relay paths is not implemented yet.
+The current implementation has QUIC/mTLS hop-by-hop encryption and authentication. It also supports required end-to-end encrypted TCP payload mode for configured services: the egress proves service identity, the ingress proves original client node identity, and payload bytes are carried in encrypted E2E frames. Plaintext routed access to a service configured with `services[].e2e` is rejected; direct one-hop plaintext remains available for `e2e: auto` topologies.
 
 Relay authorization is explicit for routed traffic. Intermediate relays require the authenticated previous hop to be listed in `allowed_relay_clients`; routed egress nodes require the previous-hop relay to be listed in top-level `peers`. Final service access is still controlled separately by each service's `peers` allowlist. If a service's `peers` list is omitted or empty, any authenticated peer may use that service.
 
@@ -286,7 +322,7 @@ Near-term:
 
 Longer-term:
 
-- End-to-end encrypted payload frames.
+- Broader E2E operational hardening and policy controls.
 - UDP support.
 - Topology/status commands.
 - More complete direction-independent peer/session behavior.

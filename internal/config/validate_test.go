@@ -16,6 +16,31 @@ func TestValidateClientAcceptsValidConfig(t *testing.T) {
 		t.Fatalf("expected valid client config, got %v", err)
 	}
 }
+
+func TestValidateClientAcceptsForwardE2EWithServiceCA(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.ServiceIdentity.CA = "service-ca.crt"
+	cfg.Forwards[0].E2E = ForwardE2EAuto
+	if err := ValidateClient(&cfg); err != nil {
+		t.Fatalf("expected e2e auto with service CA to be accepted, got %v", err)
+	}
+}
+
+func TestValidateClientRejectsForwardE2EWithoutServiceCA(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Forwards[0].E2E = ForwardE2EAlways
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected e2e always without service CA to be rejected")
+	}
+}
+
+func TestValidateClientRejectsInvalidForwardE2E(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Forwards[0].E2E = "sometimes"
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected invalid forward e2e value to be rejected")
+	}
+}
 func TestValidateClientRejectsWrongMode(t *testing.T) {
 	cfg := validClientConfig()
 	cfg.Mode = ModeServer
