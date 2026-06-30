@@ -40,6 +40,15 @@ func TestValidateClientRejectsMissingEgressWithMultipleServers(t *testing.T) {
 	}
 }
 
+func TestValidateClientAcceptsMissingEgressWithMultipleServersAndStaticRoute(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Servers = []ServerConfig{{ID: "server-1", Address: "127.0.0.1:4433"}, {ID: "server-2", Address: "127.0.0.1:4434"}}
+	cfg.Routes = []ServiceRouteConfig{{Service: "echo", Protocol: "tcp", Candidates: []RouteCandidateConfig{{Egress: "server-2", Route: []string{"server-2"}}}}}
+	if err := ValidateClient(&cfg); err != nil {
+		t.Fatalf("expected missing egress with static route to be accepted, got %v", err)
+	}
+}
+
 func TestValidateClientRejectsUnknownEgress(t *testing.T) {
 	cfg := validClientConfig()
 	cfg.Servers = []ServerConfig{{ID: "server-1", Address: "127.0.0.1:4433"}, {ID: "server-2", Address: "127.0.0.1:4434"}}

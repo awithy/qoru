@@ -75,6 +75,8 @@ Validation:
 
 ## Slice 2: Client Route Resolution
 
+Status: implemented for first-candidate static route resolution. Candidate fallback is not implemented yet.
+
 Teach the client to resolve each forward to a selected route candidate.
 
 A forward should eventually be able to identify only the service:

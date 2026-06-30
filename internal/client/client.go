@@ -50,6 +50,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 	if err := sessions.ConnectAll(ctx); err != nil {
 		return err
 	}
+	routes := newRouteResolver(cfg)
 
 	listeners := make([]forwardListener, 0, len(cfg.Forwards))
 	for _, forward := range cfg.Forwards {
@@ -68,7 +69,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 		acceptWG.Add(1)
 		go func(item forwardListener) {
 			defer acceptWG.Done()
-			acceptForward(ctx, sessions, item.forward, item.listener, logger, errCh, &handlerWG)
+			acceptForward(ctx, sessions, routes, item.forward, item.listener, logger, errCh, &handlerWG)
 		}(item)
 	}
 
@@ -112,7 +113,7 @@ func closeListeners(listeners []forwardListener) {
 	}
 }
 
-func acceptForward(ctx context.Context, session upstreamSession, forward config.ForwardConfig, listener net.Listener, logger *slog.Logger, errCh chan<- error, handlerWG *sync.WaitGroup) {
+func acceptForward(ctx context.Context, session upstreamSession, routes *routeResolver, forward config.ForwardConfig, listener net.Listener, logger *slog.Logger, errCh chan<- error, handlerWG *sync.WaitGroup) {
 	for {
 		localConn, err := listener.Accept()
 		if err != nil {
@@ -122,10 +123,11 @@ func acceptForward(ctx context.Context, session upstreamSession, forward config.
 			errCh <- err
 			return
 		}
+		selected := routes.resolve(forward)
 		handlerWG.Add(1)
 		go func() {
 			defer handlerWG.Done()
-			handleLocalConnection(ctx, session, forward.Service, forward.Egress, forward.Route, localConn, logger)
+			handleLocalConnection(ctx, session, selected.service, selected.egress, selected.route, localConn, logger)
 		}()
 	}
 }

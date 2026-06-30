@@ -65,9 +65,10 @@ func ValidateClient(cfg *Config) error {
 		if len(fwd.Route) == 0 {
 			if len(servers) > 1 {
 				if fwd.Egress == "" {
-					return fmt.Errorf("forwards[%d].egress is required when multiple servers are configured", i)
-				}
-				if _, ok := servers[fwd.Egress]; !ok {
+					if !hasServiceRoute(cfg, fwd.Protocol, fwd.Service) {
+						return fmt.Errorf("forwards[%d].egress is required when multiple servers are configured unless a static service route is configured", i)
+					}
+				} else if _, ok := servers[fwd.Egress]; !ok {
 					return fmt.Errorf("forwards[%d].egress %q does not match a configured server", i, fwd.Egress)
 				}
 			} else if fwd.Egress != "" {
@@ -78,6 +79,15 @@ func ValidateClient(cfg *Config) error {
 		}
 	}
 	return nil
+}
+
+func hasServiceRoute(cfg *Config, protocol, service string) bool {
+	for _, route := range cfg.Routes {
+		if route.Protocol == protocol && route.Service == service {
+			return true
+		}
+	}
+	return false
 }
 
 func validateForwardRoute(i int, fwd ForwardConfig, servers map[string]ServerConfig) error {
