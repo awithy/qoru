@@ -370,9 +370,11 @@ Server required fields:
 Server service and relay fields:
 
 - `routes` is client-mode only and is rejected in server mode.
-- `services`: named protocol-aware services this server can provide. Each service has `name`, `protocol`, `target`, and optional `peers`. If `peers` is omitted or empty, any authenticated peer may use that service.
+- `service_identity.ca`: optional service-identity CA bundle path. Required when any service configures `e2e`.
+- `services`: named protocol-aware services this server can provide. Each service has `name`, `protocol`, `target`, optional `peers`, and optional `e2e`. If `peers` is omitted or empty, any authenticated peer may use that service.
 - `peers`: optional configured relay peers. Each peer has `id`, optional `address`, and optional `dial`. Conceptually, `peers` represents allowed overlay neighbors. `dial: true` means this node should initiate/maintain an outbound connection to that peer; `address` is required when `dial: true`. `dial: false` or omitted means the peer relationship may be inbound-only. Routed egress requests require the previous-hop relay to be listed here.
 - `allowed_relay_clients`: optional list of authenticated node IDs allowed to use this node as an intermediate relay. A routed request with more than one remaining hop is rejected unless the previous hop appears in this list. If omitted or empty, any authenticated node may use this server as an intermediate relay.
+- `services[].e2e`: optional service identity certificate/key configuration for future E2E handshakes. When set, both `cert` and `key` are required, `service_identity.ca` is required, and the service protocol must currently be `tcp`. This configuration is loaded and validated but is not used by the runtime handshake yet.
 
 ## TLS and Identity
 
@@ -399,6 +401,8 @@ URI:spiffe://qoru/node/server-1
 The node ID is extracted from the URI SAN and used as the authenticated peer identity. DNS SANs and certificate Common Names are not used for qoru node identity.
 
 ## End-to-End Service Identity and Payload Encryption
+
+Service identity certificate plumbing is implemented for config loading, validation, development certificate generation, and certificate verification helpers. It is not used by the runtime handshake yet.
 
 The target end-to-end encryption model separates node identity from service identity:
 
@@ -713,6 +717,8 @@ The generated files include:
 ```text
 ca.crt
 ca.key
+service-ca.crt
+service-ca.key
 client-1.crt
 client-1.key
 server-1.crt
@@ -723,6 +729,10 @@ relay-b.crt
 relay-b.key
 relay-c.crt
 relay-c.key
+relay-b-echo.crt
+relay-b-echo.key
+relay-c-echo.crt
+relay-c-echo.key
 ```
 
 `dev/certs/` is ignored by git.

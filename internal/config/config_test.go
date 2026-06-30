@@ -49,6 +49,7 @@ func TestConfigShape(t *testing.T) {
 			Key:  "client.key",
 			CA:   "ca.crt",
 		},
+		ServiceIdentity: ServiceIdentityConfig{CA: "service-ca.crt"},
 		Servers: []ServerConfig{{
 			ID:      "server-1",
 			Address: "127.0.0.1:4433",
@@ -68,6 +69,12 @@ func TestConfigShape(t *testing.T) {
 				Route:  []string{"server-1"},
 			}},
 		}},
+		Services: []ServiceConfig{{
+			Name:     "echo",
+			Protocol: "tcp",
+			Target:   "127.0.0.1:9000",
+			E2E:      ServiceE2EConfig{Cert: "echo.crt", Key: "echo.key"},
+		}},
 	}
 
 	if cfg.NodeID != "client-1" || cfg.Mode != ModeClient {
@@ -79,7 +86,13 @@ func TestConfigShape(t *testing.T) {
 	if len(cfg.Forwards) != 1 || cfg.Forwards[0].Service != "echo" {
 		t.Fatalf("unexpected forwards: %#v", cfg.Forwards)
 	}
+	if cfg.ServiceIdentity.CA != "service-ca.crt" {
+		t.Fatalf("unexpected service identity: %#v", cfg.ServiceIdentity)
+	}
 	if len(cfg.Routes) != 1 || len(cfg.Routes[0].Candidates) != 1 || cfg.Routes[0].Candidates[0].Egress != "server-1" {
 		t.Fatalf("unexpected routes: %#v", cfg.Routes)
+	}
+	if len(cfg.Services) != 1 || cfg.Services[0].E2E.Cert != "echo.crt" || cfg.Services[0].E2E.Key != "echo.key" {
+		t.Fatalf("unexpected services: %#v", cfg.Services)
 	}
 }

@@ -15,6 +15,8 @@ identity:
   cert: client.crt
   key: client.key
   ca: ca.crt
+service_identity:
+  ca: service-ca.crt
 servers:
   - id: server-1
     address: 127.0.0.1:4433
@@ -42,7 +44,7 @@ routes:
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if cfg.NodeID != "client-1" || len(cfg.Servers) != 1 || len(cfg.Forwards) != 1 || cfg.Forwards[0].Service != "echo" || len(cfg.Forwards[0].Route) != 1 || cfg.Forwards[0].Route[0] != "server-1" {
+	if cfg.NodeID != "client-1" || cfg.ServiceIdentity.CA != "service-ca.crt" || len(cfg.Servers) != 1 || len(cfg.Forwards) != 1 || cfg.Forwards[0].Service != "echo" || len(cfg.Forwards[0].Route) != 1 || cfg.Forwards[0].Route[0] != "server-1" {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 	if len(cfg.Routes) != 1 || cfg.Routes[0].Selection != RouteSelectionOrdered || len(cfg.Routes[0].Candidates) != 1 || cfg.Routes[0].Candidates[0].Egress != "server-1" {

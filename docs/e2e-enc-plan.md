@@ -136,6 +136,8 @@ This can be tuned after implementation.
 
 ## Slice 4: Service Identity Certificate Plumbing
 
+Status: implemented for config loading/validation, identity helpers, and development service certificate generation. Runtime handshake use is not implemented yet.
+
 Add service identity configuration and certificate helpers, without encrypting payload yet.
 
 Possible server service config:

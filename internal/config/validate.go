@@ -254,11 +254,35 @@ func ValidateServer(cfg *Config) error {
 		if _, _, err := net.SplitHostPort(svc.Target); err != nil {
 			return fmt.Errorf("services[%d].target must be host:port: %w", i, err)
 		}
+		if err := validateServiceE2E(cfg, i, svc); err != nil {
+			return err
+		}
 		for j, peer := range svc.Peers {
 			if peer == "" {
 				return fmt.Errorf("services[%d].peers[%d] is required", i, j)
 			}
 		}
+	}
+	return nil
+}
+
+func validateServiceE2E(cfg *Config, i int, svc ServiceConfig) error {
+	hasCert := svc.E2E.Cert != ""
+	hasKey := svc.E2E.Key != ""
+	if !hasCert && !hasKey {
+		return nil
+	}
+	if svc.Protocol != "tcp" {
+		return fmt.Errorf("services[%d].e2e is only supported for tcp services", i)
+	}
+	if !hasCert {
+		return fmt.Errorf("services[%d].e2e.cert is required when e2e is configured", i)
+	}
+	if !hasKey {
+		return fmt.Errorf("services[%d].e2e.key is required when e2e is configured", i)
+	}
+	if cfg.ServiceIdentity.CA == "" {
+		return fmt.Errorf("service_identity.ca is required when services[%d].e2e is configured", i)
 	}
 	return nil
 }

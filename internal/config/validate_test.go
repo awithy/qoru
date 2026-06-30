@@ -282,6 +282,52 @@ func TestValidateServerRejectsInvalidServiceTarget(t *testing.T) {
 		t.Fatal("expected invalid service target to be rejected")
 	}
 }
+
+func TestValidateServerAcceptsServiceE2EConfig(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.ServiceIdentity = ServiceIdentityConfig{CA: "service-ca.crt"}
+	cfg.Services[0].E2E = ServiceE2EConfig{Cert: "echo.crt", Key: "echo.key"}
+	if err := ValidateServer(&cfg); err != nil {
+		t.Fatalf("expected service e2e config to be accepted, got %v", err)
+	}
+}
+
+func TestValidateServerRejectsServiceE2EMissingCert(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.ServiceIdentity = ServiceIdentityConfig{CA: "service-ca.crt"}
+	cfg.Services[0].E2E = ServiceE2EConfig{Key: "echo.key"}
+	if err := ValidateServer(&cfg); err == nil {
+		t.Fatal("expected service e2e config missing cert to be rejected")
+	}
+}
+
+func TestValidateServerRejectsServiceE2EMissingKey(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.ServiceIdentity = ServiceIdentityConfig{CA: "service-ca.crt"}
+	cfg.Services[0].E2E = ServiceE2EConfig{Cert: "echo.crt"}
+	if err := ValidateServer(&cfg); err == nil {
+		t.Fatal("expected service e2e config missing key to be rejected")
+	}
+}
+
+func TestValidateServerRejectsServiceE2EMissingCA(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.Services[0].E2E = ServiceE2EConfig{Cert: "echo.crt", Key: "echo.key"}
+	if err := ValidateServer(&cfg); err == nil {
+		t.Fatal("expected service e2e config missing ca to be rejected")
+	}
+}
+
+func TestValidateServerRejectsServiceE2EForUDP(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.ServiceIdentity = ServiceIdentityConfig{CA: "service-ca.crt"}
+	cfg.Services[0].Protocol = "udp"
+	cfg.Services[0].E2E = ServiceE2EConfig{Cert: "echo.crt", Key: "echo.key"}
+	if err := ValidateServer(&cfg); err == nil {
+		t.Fatal("expected udp service e2e config to be rejected")
+	}
+}
+
 func TestValidateServerRejectsEmptyServicePeer(t *testing.T) {
 	cfg := validServerConfig()
 	cfg.Services[0].Peers = []string{""}

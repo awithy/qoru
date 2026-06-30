@@ -18,7 +18,8 @@ type Config struct {
 	NodeID string `yaml:"node_id"`
 	Mode   string `yaml:"mode"`
 
-	Identity IdentityConfig `yaml:"identity"`
+	Identity        IdentityConfig        `yaml:"identity"`
+	ServiceIdentity ServiceIdentityConfig `yaml:"service_identity,omitempty"`
 
 	Servers []ServerConfig `yaml:"servers,omitempty"`
 	Peers   []PeerConfig   `yaml:"peers,omitempty"`
@@ -34,6 +35,10 @@ type IdentityConfig struct {
 	Cert string `yaml:"cert"`
 	Key  string `yaml:"key"`
 	CA   string `yaml:"ca"`
+}
+
+type ServiceIdentityConfig struct {
+	CA string `yaml:"ca,omitempty"`
 }
 
 type ServerConfig struct {
@@ -68,10 +73,16 @@ type RouteCandidateConfig struct {
 }
 
 type ServiceConfig struct {
-	Name     string   `yaml:"name"`
-	Protocol string   `yaml:"protocol"`
-	Target   string   `yaml:"target"`
-	Peers    []string `yaml:"peers,omitempty"`
+	Name     string           `yaml:"name"`
+	Protocol string           `yaml:"protocol"`
+	Target   string           `yaml:"target"`
+	Peers    []string         `yaml:"peers,omitempty"`
+	E2E      ServiceE2EConfig `yaml:"e2e,omitempty"`
+}
+
+type ServiceE2EConfig struct {
+	Cert string `yaml:"cert"`
+	Key  string `yaml:"key"`
 }
 
 func ResolvePath(explicit string) (string, bool) {
