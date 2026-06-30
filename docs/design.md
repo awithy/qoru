@@ -430,6 +430,7 @@ Client reconnect observability is split between upstream-session events and loca
 
 - upstream reconnect attempts after previous failures are logged at `Info`
 - failed upstream reconnect dials are logged at `Warn` with `server_id`, `addr`, `backoff`, and `next_attempt`
+- peer reconnect scheduling is logged at `Warn` with `peer_id`, `addr`, `backoff`, and `next_attempt`; repeated backoff sleeps are not logged
 - successful reconnects after previous failures are logged at `Info`
 - service/policy rejections are logged at `Warn`
 - reconnect-backoff local connection failures are logged at `Warn` with `server_id`, `addr`, and `next_attempt`

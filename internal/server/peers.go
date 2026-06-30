@@ -203,12 +203,8 @@ func (s *peerSessions) maintainConnection(ctx context.Context, peerID string) {
 	for ctx.Err() == nil {
 		conn, err := s.connection(ctx, peerID)
 		if err != nil {
-			if s.logger != nil {
-				attrs := []any{"peer_id", peerID, "error", err}
-				if backoff, ok := err.(*PeerReconnectBackoffError); ok {
-					attrs = append(attrs, "addr", backoff.Address, "next_attempt", backoff.NextAttempt.Format(time.RFC3339Nano))
-				}
-				s.logger.Warn("peer reconnect failed", attrs...)
+			if _, ok := err.(*PeerReconnectBackoffError); !ok && s.logger != nil {
+				s.logger.Warn("peer reconnect failed", "peer_id", peerID, "error", err)
 			}
 			s.sleepUntilNextDial(ctx, peerID)
 			continue
