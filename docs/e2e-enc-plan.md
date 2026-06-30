@@ -44,6 +44,8 @@ The client verifies that the selected egress proves possession of a trusted serv
 
 ## Slice 1: Static Route-Candidate Config
 
+Status: implemented for config loading and validation. No runtime behavior change yet.
+
 Add config structs and validation for static service route candidates. No runtime behavior change yet.
 
 Example future shape:

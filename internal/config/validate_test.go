@@ -93,6 +93,99 @@ func TestValidateClientAcceptsMultiHopRoute(t *testing.T) {
 	}
 }
 
+func TestValidateClientAcceptsStaticServiceRoute(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Servers = []ServerConfig{{ID: "relay-a", Address: "127.0.0.1:4433"}}
+	cfg.Routes = []ServiceRouteConfig{{
+		Service:   "echo",
+		Protocol:  "tcp",
+		Selection: RouteSelectionOrdered,
+		Candidates: []RouteCandidateConfig{{
+			Egress: "relay-b",
+			Route:  []string{"relay-a", "relay-b"},
+		}},
+	}}
+	cfg.Forwards[0].Egress = ""
+	if err := ValidateClient(&cfg); err != nil {
+		t.Fatalf("expected static service route to be accepted, got %v", err)
+	}
+}
+
+func TestValidateClientRejectsStaticServiceRouteMissingService(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Routes = []ServiceRouteConfig{{Protocol: "tcp", Candidates: []RouteCandidateConfig{{Egress: "server-1", Route: []string{"server-1"}}}}}
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected static service route missing service to be rejected")
+	}
+}
+
+func TestValidateClientRejectsStaticServiceRouteUnsupportedProtocol(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Routes = []ServiceRouteConfig{{Service: "echo", Protocol: "udp", Candidates: []RouteCandidateConfig{{Egress: "server-1", Route: []string{"server-1"}}}}}
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected static service route unsupported protocol to be rejected")
+	}
+}
+
+func TestValidateClientRejectsStaticServiceRouteUnsupportedSelection(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Routes = []ServiceRouteConfig{{Service: "echo", Protocol: "tcp", Selection: "round_robin", Candidates: []RouteCandidateConfig{{Egress: "server-1", Route: []string{"server-1"}}}}}
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected static service route unsupported selection to be rejected")
+	}
+}
+
+func TestValidateClientRejectsStaticServiceRouteMissingCandidate(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Routes = []ServiceRouteConfig{{Service: "echo", Protocol: "tcp"}}
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected static service route missing candidate to be rejected")
+	}
+}
+
+func TestValidateClientRejectsStaticServiceRouteMissingCandidateEgress(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Routes = []ServiceRouteConfig{{Service: "echo", Protocol: "tcp", Candidates: []RouteCandidateConfig{{Route: []string{"server-1"}}}}}
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected static service route missing candidate egress to be rejected")
+	}
+}
+
+func TestValidateClientRejectsStaticServiceRouteEmptyCandidateRoute(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Routes = []ServiceRouteConfig{{Service: "echo", Protocol: "tcp", Candidates: []RouteCandidateConfig{{Egress: "server-1"}}}}
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected static service route empty candidate route to be rejected")
+	}
+}
+
+func TestValidateClientRejectsStaticServiceRouteUnknownFirstHop(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Routes = []ServiceRouteConfig{{Service: "echo", Protocol: "tcp", Candidates: []RouteCandidateConfig{{Egress: "server-2", Route: []string{"server-2"}}}}}
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected static service route unknown first hop to be rejected")
+	}
+}
+
+func TestValidateClientRejectsStaticServiceRouteEgressMismatch(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Routes = []ServiceRouteConfig{{Service: "echo", Protocol: "tcp", Candidates: []RouteCandidateConfig{{Egress: "server-2", Route: []string{"server-1"}}}}}
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected static service route egress mismatch to be rejected")
+	}
+}
+
+func TestValidateClientRejectsDuplicateStaticServiceRoutes(t *testing.T) {
+	cfg := validClientConfig()
+	cfg.Routes = []ServiceRouteConfig{
+		{Service: "echo", Protocol: "tcp", Candidates: []RouteCandidateConfig{{Egress: "server-1", Route: []string{"server-1"}}}},
+		{Service: "echo", Protocol: "tcp", Candidates: []RouteCandidateConfig{{Egress: "server-1", Route: []string{"server-1"}}}},
+	}
+	if err := ValidateClient(&cfg); err == nil {
+		t.Fatal("expected duplicate static service routes to be rejected")
+	}
+}
+
 func TestValidateClientRejectsMissingForward(t *testing.T) {
 	cfg := validClientConfig()
 	cfg.Forwards = nil
@@ -148,6 +241,14 @@ func TestValidateServerRejectsServers(t *testing.T) {
 	cfg.Servers = []ServerConfig{{ID: "relay-b", Address: "127.0.0.1:4434"}}
 	if err := ValidateServer(&cfg); err == nil {
 		t.Fatal("expected server-mode servers to be rejected")
+	}
+}
+
+func TestValidateServerRejectsRoutes(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.Routes = []ServiceRouteConfig{{Service: "echo", Protocol: "tcp", Candidates: []RouteCandidateConfig{{Egress: "relay-b", Route: []string{"relay-b"}}}}}
+	if err := ValidateServer(&cfg); err == nil {
+		t.Fatal("expected server-mode routes to be rejected")
 	}
 }
 

@@ -25,6 +25,14 @@ forwards:
     egress: server-1
     route:
       - server-1
+routes:
+  - service: echo
+    protocol: tcp
+    selection: ordered
+    candidates:
+      - egress: server-1
+        route:
+          - server-1
 `
 	if err := os.WriteFile(path, []byte(input), 0o644); err != nil {
 		t.Fatal(err)
@@ -36,6 +44,9 @@ forwards:
 	}
 	if cfg.NodeID != "client-1" || len(cfg.Servers) != 1 || len(cfg.Forwards) != 1 || cfg.Forwards[0].Service != "echo" || len(cfg.Forwards[0].Route) != 1 || cfg.Forwards[0].Route[0] != "server-1" {
 		t.Fatalf("unexpected config: %#v", cfg)
+	}
+	if len(cfg.Routes) != 1 || cfg.Routes[0].Selection != RouteSelectionOrdered || len(cfg.Routes[0].Candidates) != 1 || cfg.Routes[0].Candidates[0].Egress != "server-1" {
+		t.Fatalf("unexpected routes: %#v", cfg.Routes)
 	}
 }
 

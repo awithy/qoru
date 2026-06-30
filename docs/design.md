@@ -224,6 +224,8 @@ forwards:
 
 The client requests a named service. Service names are currently resolved on the selected direct upstream server for one-hop requests, or on the final route hop for explicit-route requests. `egress` is optional when exactly one upstream server is configured and no explicit route is used; empty means that server may satisfy the request. When multiple upstream servers are configured and no explicit route is used, each forward must set `egress` to one configured server ID. For explicit routes, the first route hop selects the direct upstream server, and `egress`, if set, must match the final route hop.
 
+Static service route candidate configuration is partially implemented in config loading and validation, but is not used by the client runtime yet. Runtime route resolution and candidate selection are planned next.
+
 A forward may include a `route` field for explicit multi-hop routing. The first hop must be a configured direct upstream server. The final hop is the egress node:
 
 ```yaml
@@ -357,6 +359,8 @@ Client required fields:
 - route length is capped at `3` hops for the first multi-hop implementation
 - the first route hop must match a configured direct upstream server
 - if both `route` and `egress` are set, `egress` must match the final route hop
+- optional top-level `routes` entries define static service route candidates for future client runtime selection; each entry requires `service`, `protocol: tcp`, optional `selection: ordered`, and at least one candidate
+- each static route candidate requires `egress` and non-empty `route`; the first hop must match a configured direct upstream server and the final hop must match `egress`
 
 Server required fields:
 
@@ -365,6 +369,7 @@ Server required fields:
 
 Server service and relay fields:
 
+- `routes` is client-mode only and is rejected in server mode.
 - `services`: named protocol-aware services this server can provide. Each service has `name`, `protocol`, `target`, and optional `peers`. If `peers` is omitted or empty, any authenticated peer may use that service.
 - `peers`: optional configured relay peers. Each peer has `id`, optional `address`, and optional `dial`. Conceptually, `peers` represents allowed overlay neighbors. `dial: true` means this node should initiate/maintain an outbound connection to that peer; `address` is required when `dial: true`. `dial: false` or omitted means the peer relationship may be inbound-only. Routed egress requests require the previous-hop relay to be listed here.
 - `allowed_relay_clients`: optional list of authenticated node IDs allowed to use this node as an intermediate relay. A routed request with more than one remaining hop is rejected unless the previous hop appears in this list. If omitted or empty, any authenticated node may use this server as an intermediate relay.

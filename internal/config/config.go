@@ -24,9 +24,10 @@ type Config struct {
 	Peers   []PeerConfig   `yaml:"peers,omitempty"`
 	Listen  string         `yaml:"listen,omitempty"`
 
-	Forwards            []ForwardConfig `yaml:"forwards,omitempty"`
-	Services            []ServiceConfig `yaml:"services,omitempty"`
-	AllowedRelayClients []string        `yaml:"allowed_relay_clients,omitempty"`
+	Forwards            []ForwardConfig      `yaml:"forwards,omitempty"`
+	Routes              []ServiceRouteConfig `yaml:"routes,omitempty"`
+	Services            []ServiceConfig      `yaml:"services,omitempty"`
+	AllowedRelayClients []string             `yaml:"allowed_relay_clients,omitempty"`
 }
 
 type IdentityConfig struct {
@@ -52,6 +53,18 @@ type ForwardConfig struct {
 	Service  string   `yaml:"service"`
 	Egress   string   `yaml:"egress,omitempty"`
 	Route    []string `yaml:"route,omitempty"`
+}
+
+type ServiceRouteConfig struct {
+	Service    string                 `yaml:"service"`
+	Protocol   string                 `yaml:"protocol"`
+	Selection  string                 `yaml:"selection,omitempty"`
+	Candidates []RouteCandidateConfig `yaml:"candidates"`
+}
+
+type RouteCandidateConfig struct {
+	Egress string   `yaml:"egress"`
+	Route  []string `yaml:"route"`
 }
 
 type ServiceConfig struct {

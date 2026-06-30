@@ -5,7 +5,10 @@ import (
 	"net"
 )
 
-const MaxForwardRouteLength = 3
+const (
+	MaxForwardRouteLength = 3
+	RouteSelectionOrdered = "ordered"
+)
 
 func ValidateForMode(cfg *Config) error {
 	if cfg == nil {
@@ -32,6 +35,9 @@ func ValidateClient(cfg *Config) error {
 	}
 	servers, err := validateClientServers(cfg)
 	if err != nil {
+		return err
+	}
+	if err := validateServiceRoutes(cfg, servers); err != nil {
 		return err
 	}
 	if len(cfg.Forwards) == 0 {
@@ -103,6 +109,59 @@ func validateClientServers(cfg *Config) (map[string]ServerConfig, error) {
 	return validateConfiguredServers(cfg)
 }
 
+func validateServiceRoutes(cfg *Config, servers map[string]ServerConfig) error {
+	seen := make(map[string]struct{}, len(cfg.Routes))
+	for i, route := range cfg.Routes {
+		if route.Service == "" {
+			return fmt.Errorf("routes[%d].service is required", i)
+		}
+		if route.Protocol == "" {
+			return fmt.Errorf("routes[%d].protocol is required", i)
+		}
+		if route.Protocol != "tcp" {
+			return fmt.Errorf("routes[%d].protocol must be tcp", i)
+		}
+		selection := route.Selection
+		if selection == "" {
+			selection = RouteSelectionOrdered
+		}
+		if selection != RouteSelectionOrdered {
+			return fmt.Errorf("routes[%d].selection must be %q", i, RouteSelectionOrdered)
+		}
+		key := route.Protocol + "\x00" + route.Service
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("routes[%d] duplicates %s service %q", i, route.Protocol, route.Service)
+		}
+		seen[key] = struct{}{}
+		if len(route.Candidates) == 0 {
+			return fmt.Errorf("routes[%d].candidates must contain at least one entry", i)
+		}
+		for j, candidate := range route.Candidates {
+			if candidate.Egress == "" {
+				return fmt.Errorf("routes[%d].candidates[%d].egress is required", i, j)
+			}
+			if len(candidate.Route) == 0 {
+				return fmt.Errorf("routes[%d].candidates[%d].route must contain at least one hop", i, j)
+			}
+			if len(candidate.Route) > MaxForwardRouteLength {
+				return fmt.Errorf("routes[%d].candidates[%d].route has %d hops, max is %d", i, j, len(candidate.Route), MaxForwardRouteLength)
+			}
+			for k, hop := range candidate.Route {
+				if hop == "" {
+					return fmt.Errorf("routes[%d].candidates[%d].route[%d] is required", i, j, k)
+				}
+			}
+			if _, ok := servers[candidate.Route[0]]; !ok {
+				return fmt.Errorf("routes[%d].candidates[%d].route[0] %q does not match a configured server", i, j, candidate.Route[0])
+			}
+			if candidate.Route[len(candidate.Route)-1] != candidate.Egress {
+				return fmt.Errorf("routes[%d].candidates[%d].egress %q must match final route hop %q", i, j, candidate.Egress, candidate.Route[len(candidate.Route)-1])
+			}
+		}
+	}
+	return nil
+}
+
 func validateServerPeers(cfg *Config) (map[string]PeerConfig, error) {
 	peers := make(map[string]PeerConfig)
 	for i, peer := range cfg.Peers {
@@ -154,6 +213,9 @@ func ValidateServer(cfg *Config) error {
 	}
 	if cfg.Listen == "" {
 		return fmt.Errorf("listen is required for server mode")
+	}
+	if len(cfg.Routes) > 0 {
+		return fmt.Errorf("routes is client-mode only")
 	}
 	if len(cfg.Servers) > 0 {
 		return fmt.Errorf("servers is client-mode only; use peers for server relay configuration")

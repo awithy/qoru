@@ -59,6 +59,15 @@ func TestConfigShape(t *testing.T) {
 			Service:  "echo",
 			Egress:   "server-1",
 		}},
+		Routes: []ServiceRouteConfig{{
+			Service:   "echo",
+			Protocol:  "tcp",
+			Selection: RouteSelectionOrdered,
+			Candidates: []RouteCandidateConfig{{
+				Egress: "server-1",
+				Route:  []string{"server-1"},
+			}},
+		}},
 	}
 
 	if cfg.NodeID != "client-1" || cfg.Mode != ModeClient {
@@ -69,5 +78,8 @@ func TestConfigShape(t *testing.T) {
 	}
 	if len(cfg.Forwards) != 1 || cfg.Forwards[0].Service != "echo" {
 		t.Fatalf("unexpected forwards: %#v", cfg.Forwards)
+	}
+	if len(cfg.Routes) != 1 || len(cfg.Routes[0].Candidates) != 1 || cfg.Routes[0].Candidates[0].Egress != "server-1" {
+		t.Fatalf("unexpected routes: %#v", cfg.Routes)
 	}
 }
