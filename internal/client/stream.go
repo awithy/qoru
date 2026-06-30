@@ -55,6 +55,7 @@ func isConnectRejected(err error) bool {
 }
 
 func ConnectToServer(ctx context.Context, nodeID string, identityCfg config.IdentityConfig, serverCfg config.ServerConfig, logger *slog.Logger) (*quic.Conn, error) {
+	logger = ensureLogger(logger)
 	tlsConfig, err := identity.ClientTLSConfig(identityCfg, serverCfg.ID)
 	if err != nil {
 		return nil, err
@@ -68,9 +69,7 @@ func ConnectToServer(ctx context.Context, nodeID string, identityCfg config.Iden
 		return nil, err
 	}
 
-	if logger != nil {
-		logger.Info("client connected", "node_id", nodeID, "server_id", serverCfg.ID, "addr", serverCfg.Address)
-	}
+	logger.Info("client connected", "node_id", nodeID, "server_id", serverCfg.ID, "addr", serverCfg.Address)
 
 	return conn, nil
 }

@@ -33,6 +33,7 @@ type forwardListener struct {
 }
 
 func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOptions ...Option) error {
+	logger = ensureLogger(logger)
 	if err := config.ValidateClient(cfg); err != nil {
 		return err
 	}
@@ -85,9 +86,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 
 	for _, item := range listeners {
 		addr := item.listener.Addr().String()
-		if logger != nil {
-			logger.Info("client listening", "node_id", cfg.NodeID, "addr", addr, "service", item.forward.Service, "egress", item.forward.Egress)
-		}
+		logger.Info("client listening", "node_id", cfg.NodeID, "addr", addr, "service", item.forward.Service, "egress", item.forward.Egress)
 		if opts.started != nil {
 			opts.started(addr)
 		}
@@ -147,48 +146,39 @@ func waitGroupTimeout(wg *sync.WaitGroup, timeout time.Duration) error {
 }
 
 func handleLocalConnection(ctx context.Context, session upstreamSession, service, egress string, route []string, localConn net.Conn, logger *slog.Logger) {
+	logger = ensureLogger(logger)
 	defer localConn.Close()
 
 	requestID, err := requestid.New()
 	if err != nil {
-		if logger != nil {
-			logger.Error("generate request id failed", "service", service, "egress", egress, "route", route, "error", err)
-		}
+		logger.Error("generate request id failed", "service", service, "egress", egress, "route", route, "error", err)
 		return
 	}
-	if logger != nil {
-		logger = logger.With("request_id", requestID, "service", service, "egress", egress, "route", route, "local_addr", localConn.LocalAddr().String(), "remote_addr", localConn.RemoteAddr().String())
-		logger.Info("local tcp connection accepted")
-	}
+	logger = logger.With("request_id", requestID, "service", service, "egress", egress, "route", route, "local_addr", localConn.LocalAddr().String(), "remote_addr", localConn.RemoteAddr().String())
+	logger.Info("local tcp connection accepted")
 
 	stream, err := session.OpenTCPStream(ctx, requestID, service, egress, route)
 	if err != nil {
-		if logger != nil {
-			var rejected *ConnectRejectedError
-			var backoff *ReconnectBackoffError
-			switch {
-			case errors.As(err, &rejected):
-				logger.Warn("tcp service rejected", "response_code", rejected.Code.String(), "error", err)
-			case errors.As(err, &backoff):
-				logger.Warn(
-					"upstream reconnect backoff active",
-					"server_id", backoff.ServerID,
-					"addr", backoff.Address,
-					"next_attempt", backoff.NextAttempt.Format(time.RFC3339Nano),
-					"error", err,
-				)
-			default:
-				logger.Error("open tcp stream failed", "error", err)
-			}
+		var rejected *ConnectRejectedError
+		var backoff *ReconnectBackoffError
+		switch {
+		case errors.As(err, &rejected):
+			logger.Warn("tcp service rejected", "response_code", rejected.Code.String(), "error", err)
+		case errors.As(err, &backoff):
+			logger.Warn(
+				"upstream reconnect backoff active",
+				"server_id", backoff.ServerID,
+				"addr", backoff.Address,
+				"next_attempt", backoff.NextAttempt.Format(time.RFC3339Nano),
+				"error", err,
+			)
+		default:
+			logger.Error("open tcp stream failed", "error", err)
 		}
 		return
 	}
 
-	if logger != nil {
-		logger.Info("tcp stream connected")
-	}
+	logger.Info("tcp stream connected")
 	proxyTCP(localConn, stream)
-	if logger != nil {
-		logger.Info("local tcp proxy closed")
-	}
+	logger.Info("local tcp proxy closed")
 }
