@@ -61,6 +61,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 		return err
 	}
 
+	e2eRuntime, err := newE2EServerRuntime(cfg)
+	if err != nil {
+		return err
+	}
+
 	listener, err := quic.ListenAddr(cfg.Listen, tlsConfig, &quic.Config{})
 	if err != nil {
 		return err
@@ -76,11 +81,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 	logger.Info("server listening", "node_id", cfg.NodeID, "addr", addr)
 	if opts.started != nil {
 		opts.started(addr)
-	}
-
-	e2eRuntime, err := newE2EServerRuntime(cfg)
-	if err != nil {
-		return err
 	}
 
 	rt := &serverRuntime{ctx: ctx, cfg: cfg, logger: logger, opts: opts, e2e: e2eRuntime}

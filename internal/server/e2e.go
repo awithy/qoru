@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"log/slog"
@@ -13,7 +14,8 @@ import (
 )
 
 type e2eServerRuntime struct {
-	nodeRoots *x509.CertPool
+	nodeRoots    *x509.CertPool
+	serviceCerts map[string]tls.Certificate
 }
 
 func newE2EServerRuntime(cfg *config.Config) (*e2eServerRuntime, error) {
@@ -21,7 +23,36 @@ func newE2EServerRuntime(cfg *config.Config) (*e2eServerRuntime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load node identity CA: %w", err)
 	}
-	return &e2eServerRuntime{nodeRoots: roots}, nil
+	rt := &e2eServerRuntime{nodeRoots: roots, serviceCerts: make(map[string]tls.Certificate)}
+	if err := rt.loadServiceCertificates(cfg); err != nil {
+		return nil, err
+	}
+	return rt, nil
+}
+
+func (rt *e2eServerRuntime) loadServiceCertificates(cfg *config.Config) error {
+	var serviceRoots *x509.CertPool
+	for i, svc := range cfg.Services {
+		if !isServiceE2EConfigured(svc) {
+			continue
+		}
+		if serviceRoots == nil {
+			roots, err := identity.LoadCertPool(cfg.ServiceIdentity.CA)
+			if err != nil {
+				return fmt.Errorf("load service identity CA: %w", err)
+			}
+			serviceRoots = roots
+		}
+		cert, err := identity.LoadServiceCertificate(svc.E2E)
+		if err != nil {
+			return fmt.Errorf("load services[%d] e2e certificate: %w", i, err)
+		}
+		if err := identity.VerifyServiceCertificate(cert.Certificate, serviceRoots, svc.Name); err != nil {
+			return fmt.Errorf("verify services[%d] e2e certificate for service %q: %w", i, svc.Name, err)
+		}
+		rt.serviceCerts[serviceE2ECacheKey(svc)] = cert
+	}
+	return nil
 }
 
 type e2eServerHandshakeResult struct {
@@ -34,10 +65,7 @@ func (rt *e2eServerRuntime) runHandshake(stream *quic.Stream, req protocol.Conne
 	if rt == nil {
 		return e2eServerHandshakeResult{}, fmt.Errorf("e2e runtime is not initialized")
 	}
-	if svc.E2E.Cert == "" || svc.E2E.Key == "" {
-		return e2eServerHandshakeResult{}, fmt.Errorf("service %q is not configured for e2e", svc.Name)
-	}
-	serviceCert, err := identity.LoadServiceCertificate(svc.E2E)
+	serviceCert, err := rt.serviceCertificate(svc)
 	if err != nil {
 		return e2eServerHandshakeResult{}, err
 	}
@@ -97,6 +125,21 @@ func (rt *e2eServerRuntime) runHandshake(stream *quic.Stream, req protocol.Conne
 	}
 	logger.Info("e2e handshake complete", "original_client_id", clientID)
 	return e2eServerHandshakeResult{reader: reader, writer: writer, clientID: clientID}, nil
+}
+
+func (rt *e2eServerRuntime) serviceCertificate(svc config.ServiceConfig) (tls.Certificate, error) {
+	if svc.E2E.Cert == "" || svc.E2E.Key == "" {
+		return tls.Certificate{}, fmt.Errorf("service %q is not configured for e2e", svc.Name)
+	}
+	cert, ok := rt.serviceCerts[serviceE2ECacheKey(svc)]
+	if !ok {
+		return tls.Certificate{}, fmt.Errorf("service %q e2e certificate is not loaded", svc.Name)
+	}
+	return cert, nil
+}
+
+func serviceE2ECacheKey(svc config.ServiceConfig) string {
+	return svc.Protocol + "\x00" + svc.Name + "\x00" + svc.E2E.Cert + "\x00" + svc.E2E.Key
 }
 
 func isServiceE2EConfigured(svc config.ServiceConfig) bool {
