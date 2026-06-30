@@ -393,8 +393,12 @@ func TestRunReconnectsForNewLocalTCPConnections(t *testing.T) {
 
 	serverCtx2, serverCancel2 := context.WithCancel(context.Background())
 	defer serverCancel2()
-	addr2, serverErr2 := startTestServerWithConfig(t, serverCtx2, logger, serverCfg, nil)
-	clientCfg.Servers[0].Address = addr2
+	serverCfg2 := *serverCfg
+	serverCfg2.Listen = addr
+	addr2, serverErr2 := startTestServerWithConfigEventually(t, serverCtx2, logger, &serverCfg2, nil)
+	if addr2 != addr {
+		t.Fatalf("expected restarted server to listen on %s, got %s", addr, addr2)
+	}
 
 	assertEcho(t, clientAddr, "two!")
 
@@ -685,6 +689,35 @@ func testServerConfig() *config.Config {
 
 func startTestServerWithConfig(t *testing.T, ctx context.Context, logger *slog.Logger, serverCfg *config.Config, onConnect func(protocol.ConnectRequest)) (string, <-chan error) {
 	t.Helper()
+	return startTestServerWithConfigAttempt(t, ctx, logger, serverCfg, onConnect)
+}
+
+func startTestServerWithConfigEventually(t *testing.T, ctx context.Context, logger *slog.Logger, serverCfg *config.Config, onConnect func(protocol.ConnectRequest)) (string, <-chan error) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		addr, serverErr, err := tryStartTestServerWithConfig(ctx, logger, serverCfg, onConnect)
+		if err == nil {
+			return addr, serverErr
+		}
+		if !strings.Contains(err.Error(), "address already in use") || time.Now().After(deadline) {
+			t.Fatalf("server exited before starting: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	panic("unreachable")
+}
+
+func startTestServerWithConfigAttempt(t *testing.T, ctx context.Context, logger *slog.Logger, serverCfg *config.Config, onConnect func(protocol.ConnectRequest)) (string, <-chan error) {
+	t.Helper()
+	addr, serverErr, err := tryStartTestServerWithConfig(ctx, logger, serverCfg, onConnect)
+	if err != nil {
+		t.Fatalf("server exited before starting: %v", err)
+	}
+	return addr, serverErr
+}
+
+func tryStartTestServerWithConfig(ctx context.Context, logger *slog.Logger, serverCfg *config.Config, onConnect func(protocol.ConnectRequest)) (string, <-chan error, error) {
 	started := make(chan string, 1)
 	serverErr := make(chan error, 1)
 	options := []server.Option{server.WithStartedFunc(func(addr string) { started <- addr })}
@@ -698,13 +731,12 @@ func startTestServerWithConfig(t *testing.T, ctx context.Context, logger *slog.L
 
 	select {
 	case addr := <-started:
-		return addr, serverErr
+		return addr, serverErr, nil
 	case err := <-serverErr:
-		t.Fatalf("server exited before starting: %v", err)
+		return "", nil, err
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for server to start")
+		return "", nil, fmt.Errorf("timed out waiting for server to start")
 	}
-	panic("unreachable")
 }
 
 func makeDevNodeCert(t *testing.T, nodeID string) config.IdentityConfig {

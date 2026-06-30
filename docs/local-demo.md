@@ -1,22 +1,26 @@
 # Local Demo
 
-This demo runs a one-hop TCP proxy locally:
+The simplest demo runs a one-hop TCP proxy locally:
 
 ```text
 TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP echo target
 ```
 
-## Automated end-to-end check
+Additional smoke tests exercise explicit two-hop and three-hop relay routes.
 
-Run the local demo as a single smoke test:
+## Automated end-to-end checks
+
+Run the local smoke tests:
 
 ```sh
 make demo-e2e
+make demo-multihop
+make demo-threehop
 ```
 
-This starts an echo target, qoru server, and qoru client; sends a test payload through the local client listener; verifies the echoed response; then cleans up. The generated temporary server config exposes an `echo` service for `client-1`.
+`demo-e2e` starts an echo target, qoru server, and qoru client; sends a test payload through the local client listener; verifies the echoed response; then cleans up. The generated temporary server config exposes an `echo` service for `client-1`.
 
-By default, the script chooses free local ports. Addresses can be overridden with `QORU_DEMO_SERVER_ADDR`, `QORU_DEMO_CLIENT_ADDR`, and `QORU_DEMO_TARGET_ADDR`.
+By default, the scripts choose free local ports. The one-hop script addresses can be overridden with `QORU_DEMO_SERVER_ADDR`, `QORU_DEMO_CLIENT_ADDR`, and `QORU_DEMO_TARGET_ADDR`.
 
 ## Manual demo
 
@@ -89,5 +93,5 @@ hello
 
 - The client and server use QUIC with mTLS.
 - The dev certs are generated under `dev/certs/` and are ignored by git.
-- The current implementation is one-hop only.
+- The current implementation supports one-hop and explicit-route multi-hop TCP forwarding.
 - Server-side access policy is service/peer based today. The automated demo exposes the `echo` service only to `client-1`.

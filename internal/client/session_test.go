@@ -93,6 +93,6 @@ func TestReconnectingUpstreamSessionBackoffCapsAndResetsAfterSuccess(t *testing.
 
 func newTestReconnectingUpstreamSession() *reconnectingUpstreamSession {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := &config.ServerConfig{ID: "server-1", Address: "127.0.0.1:4433"}
+	server := config.ServerConfig{ID: "server-1", Address: "127.0.0.1:4433"}
 	return newReconnectingUpstreamSession("client-1", config.IdentityConfig{}, server, logger)
 }

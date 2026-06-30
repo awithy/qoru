@@ -51,14 +51,12 @@ func newUpstreamSessions(cfg *config.Config, logger *slog.Logger) (*upstreamSess
 	return &upstreamSessions{sessions: sessions, defaultID: defaultID}, nil
 }
 
-func configuredServers(cfg *config.Config) ([]*config.ServerConfig, error) {
+func configuredServers(cfg *config.Config) ([]config.ServerConfig, error) {
 	if len(cfg.Servers) == 0 {
 		return nil, fmt.Errorf("at least one servers entry is required for client mode")
 	}
-	servers := make([]*config.ServerConfig, 0, len(cfg.Servers))
-	for i := range cfg.Servers {
-		servers = append(servers, &cfg.Servers[i])
-	}
+	servers := make([]config.ServerConfig, len(cfg.Servers))
+	copy(servers, cfg.Servers)
 	return servers, nil
 }
 
@@ -110,7 +108,7 @@ func (s *upstreamSessions) selectSession(egress string) (*reconnectingUpstreamSe
 type reconnectingUpstreamSession struct {
 	nodeID   string
 	identity config.IdentityConfig
-	server   *config.ServerConfig
+	server   config.ServerConfig
 	logger   *slog.Logger
 
 	mu     sync.Mutex
@@ -124,7 +122,7 @@ type reconnectingUpstreamSession struct {
 	backoffFailCount int
 }
 
-func newReconnectingUpstreamSession(nodeID string, identity config.IdentityConfig, server *config.ServerConfig, logger *slog.Logger) *reconnectingUpstreamSession {
+func newReconnectingUpstreamSession(nodeID string, identity config.IdentityConfig, server config.ServerConfig, logger *slog.Logger) *reconnectingUpstreamSession {
 	return &reconnectingUpstreamSession{
 		nodeID:   nodeID,
 		identity: identity,
@@ -197,7 +195,7 @@ func (s *reconnectingUpstreamSession) connection(ctx context.Context) (*quic.Con
 		s.logger.Info("upstream reconnecting", "server_id", s.server.ID, "addr", s.server.Address)
 	}
 
-	conn, err := s.dial(ctx, s.nodeID, s.identity, *s.server, s.logger)
+	conn, err := s.dial(ctx, s.nodeID, s.identity, s.server, s.logger)
 	if err != nil {
 		s.recordDialFailure(now, err)
 		if s.logger != nil {
