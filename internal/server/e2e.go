@@ -147,8 +147,12 @@ func isServiceE2EConfigured(svc config.ServiceConfig) bool {
 }
 
 func writeE2ECloseError(stream *quic.Stream, err error) {
+	writeE2ECloseConnectError(stream, protocol.ConnectCodeInternalError, err)
+}
+
+func writeE2ECloseConnectError(stream *quic.Stream, code protocol.ConnectCode, err error) {
 	if err == nil {
 		return
 	}
-	_ = protocol.WriteE2EClose(stream, protocol.E2EClose{Code: e2e.CloseCodeError, Message: err.Error()})
+	_ = protocol.WriteE2EClose(stream, protocol.E2EClose{Code: e2e.CloseCodeError, ConnectCode: code, Message: err.Error()})
 }

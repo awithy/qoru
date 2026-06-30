@@ -8,16 +8,16 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-func proxyStreams(a, b *quic.Stream) {
-	proxyio.Proxy(proxyio.QUICStreamEndpoint(a), proxyio.QUICStreamEndpoint(b))
+func proxyStreams(a, b *quic.Stream) error {
+	return proxyio.Proxy(proxyio.QUICStreamEndpoint(a), proxyio.QUICStreamEndpoint(b))
 }
 
-func proxyTCP(stream *quic.Stream, targetConn net.Conn) {
-	proxyio.Proxy(proxyio.QUICStreamEndpoint(stream), proxyio.NetConnEndpoint(targetConn))
+func proxyTCP(stream *quic.Stream, targetConn net.Conn) error {
+	return proxyio.Proxy(proxyio.QUICStreamEndpoint(stream), proxyio.NetConnEndpoint(targetConn))
 }
 
-func proxyEncryptedTCP(stream *quic.Stream, reader *e2e.EncryptedReader, writer *e2e.EncryptedWriter, targetConn net.Conn) {
-	proxyio.Proxy(proxyio.Endpoint{
+func proxyEncryptedTCP(stream *quic.Stream, reader *e2e.EncryptedReader, writer *e2e.EncryptedWriter, targetConn net.Conn) error {
+	return proxyio.Proxy(proxyio.Endpoint{
 		Reader:     reader,
 		Writer:     writer,
 		CloseWrite: writer.CloseWrite,

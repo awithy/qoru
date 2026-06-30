@@ -1,17 +1,47 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"errors"
-	"github.com/awithy/qoru/internal/config"
-	"github.com/awithy/qoru/internal/protocol"
-	"github.com/awithy/qoru/internal/testcert"
 	"io"
 	"log/slog"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/awithy/qoru/internal/config"
+	"github.com/awithy/qoru/internal/e2e"
+	"github.com/awithy/qoru/internal/protocol"
+	"github.com/awithy/qoru/internal/testcert"
 )
+
+func TestReadE2EServerHelloOrCloseReturnsCloseError(t *testing.T) {
+	var wire bytes.Buffer
+	if err := protocol.WriteE2EClose(&wire, protocol.E2EClose{Code: e2e.CloseCodeError, ConnectCode: protocol.ConnectCodeAccessDenied, Message: "denied"}); err != nil {
+		t.Fatalf("WriteE2EClose: %v", err)
+	}
+
+	_, err := readE2EServerHelloOrClose(&wire)
+	var closeErr *e2e.CloseError
+	if !errors.As(err, &closeErr) {
+		t.Fatalf("expected CloseError, got %T: %v", err, err)
+	}
+	if closeErr.ConnectCode != protocol.ConnectCodeAccessDenied || closeErr.Message != "denied" {
+		t.Fatalf("unexpected close error: %#v", closeErr)
+	}
+}
+
+func TestE2ESetupErrorMapsCloseConnectCode(t *testing.T) {
+	err := e2eSetupError(&e2e.CloseError{Code: e2e.CloseCodeError, ConnectCode: protocol.ConnectCodeAccessDenied, Message: "denied"})
+	var rejected *ConnectRejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("expected ConnectRejectedError, got %T: %v", err, err)
+	}
+	if rejected.Code != protocol.ConnectCodeAccessDenied || rejected.Message != "denied" {
+		t.Fatalf("unexpected rejection: %#v", rejected)
+	}
+}
 
 func TestRunProxiesE2EEncryptedOneHop(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io"
 	"log/slog"
 
 	"github.com/awithy/qoru/internal/config"
@@ -49,9 +50,9 @@ func (rt *e2eClientRuntime) runHandshake(stream *quic.Stream, requestID string, 
 	if err := protocol.WriteE2EClientHello(stream, clientHello); err != nil {
 		return nil, nil, fmt.Errorf("write e2e client hello: %w", err)
 	}
-	serverHello, err := protocol.ReadE2EServerHello(stream)
+	serverHello, err := readE2EServerHelloOrClose(stream)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read e2e server hello: %w", err)
+		return nil, nil, err
 	}
 	if _, err := e2e.VerifyServerHello(handshakeCtx, serverHello, rt.serviceRoots, clientHello.EphemeralPublicKey); err != nil {
 		return nil, nil, err
@@ -85,4 +86,23 @@ func (rt *e2eClientRuntime) runHandshake(stream *quic.Stream, requestID string, 
 	}
 	logger.Info("e2e handshake complete")
 	return reader, writer, nil
+}
+
+func readE2EServerHelloOrClose(r io.Reader) (protocol.E2EServerHello, error) {
+	frame, err := protocol.ReadFrame(r)
+	if err != nil {
+		return protocol.E2EServerHello{}, fmt.Errorf("read e2e server hello: %w", err)
+	}
+	switch frame.Type {
+	case protocol.TypeE2EServerHello:
+		return protocol.DecodeE2EServerHelloPayload(frame.Payload)
+	case protocol.TypeE2EClose:
+		closeFrame, err := protocol.DecodeE2EClosePayload(frame.Payload)
+		if err != nil {
+			return protocol.E2EServerHello{}, err
+		}
+		return protocol.E2EServerHello{}, &e2e.CloseError{Code: closeFrame.Code, ConnectCode: closeFrame.ConnectCode, Message: closeFrame.Message}
+	default:
+		return protocol.E2EServerHello{}, fmt.Errorf("unexpected message type %d", frame.Type)
+	}
 }

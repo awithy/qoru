@@ -302,8 +302,7 @@ Open design items:
 
 - exact runtime frame ordering and negotiation
 - whether handshake readiness is carried in existing response frames or new frame types
-- runtime half-close integration over encrypted frames
-- runtime error mapping and logging
+- richer runtime half-close integration and observability over encrypted frames
 
 ## Slice 8: Require and Enforce E2E Policy
 

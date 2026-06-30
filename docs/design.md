@@ -612,9 +612,10 @@ ciphertext       []byte
 `E2EClose` payload:
 
 ```text
-code        uint8
-message_len uint16 big endian
-message     []byte
+code         uint8
+connect_code uint8 // protocol ConnectCode associated with error closes, OK for normal EOF
+message_len  uint16 big endian
+message      []byte
 ```
 
 Current E2E scaffolding limits:
@@ -628,7 +629,7 @@ MaxE2EFinishedSignatureLength = 8192
 MaxE2ENonceSuffixLength       = 24
 ```
 
-The handshake core uses X25519 ephemeral keys, certificate signatures, a transcript bound to `request_id`, `service`, `egress`, original `e2e_route`, and both ephemeral keys, plus HKDF-derived directional traffic keys. The encrypted record-layer helper uses AES-GCM, directional keys, 8-byte big-endian sequence nonce suffixes, strict in-order sequence checks, transcript-bound associated data, and `E2EClose` for encrypted-mode EOF signaling. Runtime E2E mode is explicit via `ConnectRequest.E2ERequired`, driven by forward `e2e` policy. Broader negotiation, richer close-code policy, and operational hardening remain open design items.
+The handshake core uses X25519 ephemeral keys, certificate signatures, a transcript bound to `request_id`, `service`, `egress`, original `e2e_route`, and both ephemeral keys, plus HKDF-derived directional traffic keys. The encrypted record-layer helper uses AES-GCM, directional keys, 8-byte big-endian sequence nonce suffixes, strict in-order sequence checks, transcript-bound associated data, and `E2EClose` for encrypted-mode EOF/error signaling. Error closes carry a protocol `ConnectCode` so E2E setup/auth/target failures can be classified consistently with plaintext setup failures. Runtime E2E mode is explicit via `ConnectRequest.E2ERequired`, driven by forward `e2e` policy. Broader negotiation and operational hardening remain open design items.
 
 Current TCP stream model:
 

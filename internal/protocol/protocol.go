@@ -40,7 +40,7 @@ const (
 	MaxE2EFinishedSignatureLength = MaxE2ESignatureLength
 	MaxE2ENonceSuffixLength       = 24
 	MaxE2ECiphertextLength        = MaxPayloadSize - 1 - MaxE2ENonceSuffixLength - 2
-	MaxE2ECloseMessageLength      = MaxPayloadSize - 3
+	MaxE2ECloseMessageLength      = MaxPayloadSize - 4
 )
 
 type ConnectCode uint8
@@ -126,8 +126,9 @@ type E2EData struct {
 }
 
 type E2EClose struct {
-	Code    uint8
-	Message string
+	Code        uint8
+	ConnectCode ConnectCode
+	Message     string
 }
 
 type E2EClientFinished struct {
@@ -451,7 +452,18 @@ func WriteE2EServerHello(w io.Writer, hello E2EServerHello) error {
 }
 
 func ReadE2EServerHello(r io.Reader) (E2EServerHello, error) {
-	chain, key, sig, err := readE2EHelloFrame(r, TypeE2EServerHello, "server")
+	frame, err := ReadFrame(r)
+	if err != nil {
+		return E2EServerHello{}, err
+	}
+	if frame.Type != TypeE2EServerHello {
+		return E2EServerHello{}, fmt.Errorf("unexpected message type %d", frame.Type)
+	}
+	return DecodeE2EServerHelloPayload(frame.Payload)
+}
+
+func DecodeE2EServerHelloPayload(payload []byte) (E2EServerHello, error) {
+	chain, key, sig, err := unmarshalE2EHello(payload, "server")
 	if err != nil {
 		return E2EServerHello{}, err
 	}
@@ -627,13 +639,17 @@ func DecodeE2EDataPayload(payload []byte) (E2EData, error) {
 }
 
 func WriteE2EClose(w io.Writer, close E2EClose) error {
+	if !close.ConnectCode.Valid() {
+		return fmt.Errorf("invalid e2e close connect code %d", close.ConnectCode)
+	}
 	if len(close.Message) > MaxE2ECloseMessageLength {
 		return fmt.Errorf("close message too long: %d > %d", len(close.Message), MaxE2ECloseMessageLength)
 	}
-	payload := make([]byte, 3+len(close.Message))
+	payload := make([]byte, 4+len(close.Message))
 	payload[0] = close.Code
-	binary.BigEndian.PutUint16(payload[1:3], uint16(len(close.Message)))
-	copy(payload[3:], close.Message)
+	payload[1] = byte(close.ConnectCode)
+	binary.BigEndian.PutUint16(payload[2:4], uint16(len(close.Message)))
+	copy(payload[4:], close.Message)
 	return WriteFrame(w, TypeE2EClose, payload)
 }
 
@@ -662,17 +678,21 @@ func ReadE2EClose(r io.Reader) (E2EClose, error) {
 }
 
 func DecodeE2EClosePayload(payload []byte) (E2EClose, error) {
-	if len(payload) < 3 {
+	if len(payload) < 4 {
 		return E2EClose{}, fmt.Errorf("malformed e2e close payload")
 	}
-	messageLen := int(binary.BigEndian.Uint16(payload[1:3]))
+	connectCode := ConnectCode(payload[1])
+	if !connectCode.Valid() {
+		return E2EClose{}, fmt.Errorf("unknown e2e close connect code %d", connectCode)
+	}
+	messageLen := int(binary.BigEndian.Uint16(payload[2:4]))
 	if messageLen > MaxE2ECloseMessageLength {
 		return E2EClose{}, fmt.Errorf("close message too long: %d > %d", messageLen, MaxE2ECloseMessageLength)
 	}
-	if len(payload[3:]) != messageLen {
+	if len(payload[4:]) != messageLen {
 		return E2EClose{}, fmt.Errorf("malformed e2e close payload: message length mismatch")
 	}
-	return E2EClose{Code: payload[0], Message: string(payload[3:])}, nil
+	return E2EClose{Code: payload[0], ConnectCode: connectCode, Message: string(payload[4:])}, nil
 }
 
 func ReadE2EClientFinished(r io.Reader) (E2EClientFinished, error) {

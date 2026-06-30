@@ -163,7 +163,9 @@ func (rt *serverRuntime) handlePlaintextServiceStream(svc config.ServiceConfig, 
 	}
 
 	logger.Info("tcp target connected", "target", svc.Target, "response_code", protocol.ConnectCodeOK.String())
-	proxyTCP(stream, targetConn)
+	if proxyErr := proxyTCP(stream, targetConn); proxyErr != nil {
+		logger.Debug("tcp proxy closed with error", "target", svc.Target, "error", proxyErr)
+	}
 	logger.Info("tcp proxy closed", "target", svc.Target)
 }
 
@@ -190,21 +192,24 @@ func (rt *serverRuntime) handleE2EStream(req protocol.ConnectRequest, stream *qu
 	}
 	handshake, err := rt.e2e.runHandshake(stream, req, svc, logger)
 	if err != nil {
-		logger.Warn("e2e handshake failed", "error", err)
-		writeE2ECloseError(stream, err)
+		code := serviceErrorCode(err)
+		logger.Warn("e2e handshake failed", "response_code", code.String(), "error", err)
+		writeE2ECloseConnectError(stream, code, err)
 		_ = stream.Close()
 		return
 	}
 	targetConn, err := dialTCP(rt.ctx, svc.Target)
 	if err != nil {
-		logger.Error("tcp target dial failed", "target", svc.Target, "error", err)
-		writeE2ECloseError(stream, err)
+		logger.Error("tcp target dial failed", "target", svc.Target, "response_code", protocol.ConnectCodeTargetDialFailed.String(), "error", err)
+		writeE2ECloseConnectError(stream, protocol.ConnectCodeTargetDialFailed, err)
 		_ = stream.Close()
 		return
 	}
 	defer targetConn.Close()
 	logger.Info("tcp target connected", "target", svc.Target, "response_code", protocol.ConnectCodeOK.String(), "original_client_id", handshake.clientID)
-	proxyEncryptedTCP(stream, handshake.reader, handshake.writer, targetConn)
+	if proxyErr := proxyEncryptedTCP(stream, handshake.reader, handshake.writer, targetConn); proxyErr != nil {
+		logger.Debug("e2e tcp proxy closed with error", "target", svc.Target, "original_client_id", handshake.clientID, "error", proxyErr)
+	}
 	logger.Info("e2e tcp proxy closed", "target", svc.Target, "original_client_id", handshake.clientID)
 }
 
@@ -254,7 +259,9 @@ func (rt *serverRuntime) handleRelayStream(req protocol.ConnectRequest, inbound 
 		return
 	}
 	logger.Info("relay stream connected", "downstream_response_code", resp.Code.String())
-	proxyStreams(inbound, outbound)
+	if proxyErr := proxyStreams(inbound, outbound); proxyErr != nil {
+		logger.Debug("relay proxy closed with error", "error", proxyErr)
+	}
 	logger.Info("relay proxy closed")
 }
 

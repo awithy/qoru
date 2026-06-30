@@ -257,7 +257,7 @@ func TestE2EDataRoundTrip(t *testing.T) {
 
 func TestE2ECloseRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
-	want := E2EClose{Code: 7, Message: "closed"}
+	want := E2EClose{Code: 7, ConnectCode: ConnectCodeTargetDialFailed, Message: "closed"}
 
 	if err := WriteE2EClose(&buf, want); err != nil {
 		t.Fatalf("WriteE2EClose returned error: %v", err)
@@ -364,7 +364,7 @@ func TestReadE2EDataRejectsMalformedPayload(t *testing.T) {
 
 func TestReadE2ECloseRejectsMalformedPayload(t *testing.T) {
 	var buf bytes.Buffer
-	if err := WriteFrame(&buf, TypeE2EClose, []byte{1, 0, 4, 'n'}); err != nil {
+	if err := WriteFrame(&buf, TypeE2EClose, []byte{1, byte(ConnectCodeInternalError), 0, 4, 'n'}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ReadE2EClose(&buf); err == nil {

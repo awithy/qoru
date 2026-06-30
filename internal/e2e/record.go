@@ -25,15 +25,16 @@ const (
 var ErrEncryptedWriterClosed = errors.New("e2e encrypted writer closed")
 
 type CloseError struct {
-	Code    uint8
-	Message string
+	Code        uint8
+	ConnectCode protocol.ConnectCode
+	Message     string
 }
 
 func (e *CloseError) Error() string {
 	if e.Message == "" {
-		return fmt.Sprintf("e2e stream closed with code %d", e.Code)
+		return fmt.Sprintf("e2e stream closed with code %d connect_code %s", e.Code, e.ConnectCode.String())
 	}
-	return fmt.Sprintf("e2e stream closed with code %d: %s", e.Code, e.Message)
+	return fmt.Sprintf("e2e stream closed with code %d connect_code %s: %s", e.Code, e.ConnectCode.String(), e.Message)
 }
 
 // EncryptedReader converts E2EData frames from r into plaintext bytes.
@@ -122,7 +123,7 @@ func (r *EncryptedReader) Read(p []byte) (int, error) {
 			if closeFrame.Code == CloseCodeOK {
 				return 0, io.EOF
 			}
-			return 0, &CloseError{Code: closeFrame.Code, Message: closeFrame.Message}
+			return 0, &CloseError{Code: closeFrame.Code, ConnectCode: closeFrame.ConnectCode, Message: closeFrame.Message}
 		default:
 			return 0, fmt.Errorf("unexpected e2e frame type %d", frame.Type)
 		}

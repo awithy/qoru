@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/awithy/qoru/internal/config"
+	"github.com/awithy/qoru/internal/e2e"
 	"github.com/awithy/qoru/internal/protocol"
 	"github.com/awithy/qoru/internal/requestid"
 )
@@ -176,17 +177,23 @@ func handleLocalConnection(ctx context.Context, session upstreamSession, e2eRunt
 			candidateLogger.Info("tcp stream connected")
 			if e2eRequired {
 				reader, writer, handshakeErr := e2eRuntime.runHandshake(stream, requestID, candidate, candidateLogger)
-				if handshakeErr != nil {
-					candidateLogger.Error("e2e handshake failed", "error", handshakeErr)
-					_ = stream.Close()
+				if handshakeErr == nil {
+					if proxyErr := proxyEncryptedTCP(localConn, stream, reader, writer); proxyErr != nil {
+						logE2EProxyError(candidateLogger, proxyErr)
+					}
+					candidateLogger.Info("local tcp proxy closed")
 					return
 				}
-				proxyEncryptedTCP(localConn, stream, reader, writer)
+				candidateLogger.Warn("e2e handshake failed", "error", handshakeErr)
+				_ = stream.Close()
+				err = e2eSetupError(handshakeErr)
 			} else {
-				proxyTCP(localConn, stream)
+				if proxyErr := proxyTCP(localConn, stream); proxyErr != nil {
+					candidateLogger.Debug("tcp proxy closed with error", "error", proxyErr)
+				}
+				candidateLogger.Info("local tcp proxy closed")
+				return
 			}
-			candidateLogger.Info("local tcp proxy closed")
-			return
 		}
 
 		retry := ctx.Err() == nil && i+1 < len(candidates) && isRetryableSetupError(err)
@@ -195,6 +202,21 @@ func handleLocalConnection(ctx context.Context, session upstreamSession, e2eRunt
 			return
 		}
 	}
+}
+
+func logE2EProxyError(logger *slog.Logger, err error) {
+	if closeErr, ok := errors.AsType[*e2e.CloseError](err); ok {
+		logger.Warn("e2e proxy closed with error", "response_code", closeErr.ConnectCode.String(), "close_code", closeErr.Code, "error", err)
+		return
+	}
+	logger.Debug("e2e proxy closed with error", "error", err)
+}
+
+func e2eSetupError(err error) error {
+	if closeErr, ok := errors.AsType[*e2e.CloseError](err); ok && closeErr.ConnectCode.Valid() && closeErr.ConnectCode != protocol.ConnectCodeOK {
+		return &ConnectRejectedError{Code: closeErr.ConnectCode, Message: closeErr.Message}
+	}
+	return err
 }
 
 func logOpenTCPStreamFailed(logger *slog.Logger, err error, retryNextCandidate bool) {

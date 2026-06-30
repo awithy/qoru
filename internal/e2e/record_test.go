@@ -162,7 +162,7 @@ func TestEncryptedWriterRejectsWriteAfterClose(t *testing.T) {
 
 func TestEncryptedReaderReturnsCloseError(t *testing.T) {
 	var wire bytes.Buffer
-	if err := protocol.WriteE2EClose(&wire, protocol.E2EClose{Code: CloseCodeError, Message: "boom"}); err != nil {
+	if err := protocol.WriteE2EClose(&wire, protocol.E2EClose{Code: CloseCodeError, ConnectCode: protocol.ConnectCodeTargetDialFailed, Message: "boom"}); err != nil {
 		t.Fatalf("WriteE2EClose: %v", err)
 	}
 	reader, err := NewEncryptedReader(&wire, testRecordKey(1), testTranscriptHash(2))
@@ -174,7 +174,7 @@ func TestEncryptedReaderReturnsCloseError(t *testing.T) {
 	if !errors.As(err, &closeErr) {
 		t.Fatalf("expected CloseError, got %T: %v", err, err)
 	}
-	if closeErr.Code != CloseCodeError || closeErr.Message != "boom" {
+	if closeErr.Code != CloseCodeError || closeErr.ConnectCode != protocol.ConnectCodeTargetDialFailed || closeErr.Message != "boom" {
 		t.Fatalf("unexpected close error: %#v", closeErr)
 	}
 }

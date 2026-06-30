@@ -24,8 +24,8 @@ type Endpoint struct {
 // A normal EOF in one direction only half-closes the opposite write side, allowing
 // protocols that half-close requests before reading responses to complete.
 // Unexpected copy or half-close errors abort both endpoints to unblock the other direction.
-func Proxy(a, b Endpoint) {
-	done := make(chan struct{}, 2)
+func Proxy(a, b Endpoint) error {
+	done := make(chan error, 2)
 	var abortOnce sync.Once
 	abort := func() {
 		abortOnce.Do(func() {
@@ -41,8 +41,8 @@ func Proxy(a, b Endpoint) {
 	go proxyOneWay(b, a, abort, done)
 	go proxyOneWay(a, b, abort, done)
 
-	<-done
-	<-done
+	err1 := <-done
+	err2 := <-done
 
 	if a.Close != nil {
 		_ = a.Close()
@@ -50,9 +50,13 @@ func Proxy(a, b Endpoint) {
 	if b.Close != nil {
 		_ = b.Close()
 	}
+	if err1 != nil {
+		return err1
+	}
+	return err2
 }
 
-func proxyOneWay(dst, src Endpoint, abort func(), done chan<- struct{}) {
+func proxyOneWay(dst, src Endpoint, abort func(), done chan<- error) {
 	_, copyErr := io.Copy(dst.Writer, src.Reader)
 	var closeErr error
 	if dst.CloseWrite != nil {
@@ -61,7 +65,11 @@ func proxyOneWay(dst, src Endpoint, abort func(), done chan<- struct{}) {
 	if copyErr != nil || closeErr != nil {
 		abort()
 	}
-	done <- struct{}{}
+	if copyErr != nil {
+		done <- copyErr
+		return
+	}
+	done <- closeErr
 }
 
 func NetConnEndpoint(conn net.Conn) Endpoint {

@@ -8,12 +8,12 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-func proxyTCP(localConn net.Conn, stream *quic.Stream) {
-	proxyio.Proxy(proxyio.NetConnEndpoint(localConn), proxyio.QUICStreamEndpoint(stream))
+func proxyTCP(localConn net.Conn, stream *quic.Stream) error {
+	return proxyio.Proxy(proxyio.NetConnEndpoint(localConn), proxyio.QUICStreamEndpoint(stream))
 }
 
-func proxyEncryptedTCP(localConn net.Conn, stream *quic.Stream, reader *e2e.EncryptedReader, writer *e2e.EncryptedWriter) {
-	proxyio.Proxy(proxyio.NetConnEndpoint(localConn), proxyio.Endpoint{
+func proxyEncryptedTCP(localConn net.Conn, stream *quic.Stream, reader *e2e.EncryptedReader, writer *e2e.EncryptedWriter) error {
+	return proxyio.Proxy(proxyio.NetConnEndpoint(localConn), proxyio.Endpoint{
 		Reader:     reader,
 		Writer:     writer,
 		CloseWrite: writer.CloseWrite,
