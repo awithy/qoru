@@ -148,6 +148,60 @@ func TestRunProxiesExplicitMultiHopRoute(t *testing.T) {
 	cancelAndWaitForServer(t, func() {}, egressErr)
 }
 
+func TestOpenTCPStreamRejectsUnauthorizedRelayIngress(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	targetListener := startEchoTCPServer(t)
+
+	egressCfg := &config.Config{
+		NodeID:   "relay-b",
+		Mode:     config.ModeServer,
+		Identity: makeDevNodeCert(t, "relay-b"),
+		Listen:   "127.0.0.1:0",
+		Peers:    []config.PeerConfig{{ID: "relay-a"}},
+		Services: []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: targetListener.Addr().String(), Peers: []string{"relay-a"}}},
+	}
+	egressAddr, egressErr := startTestServerWithConfig(t, ctx, logger, egressCfg, nil)
+
+	relayCfg := &config.Config{
+		NodeID:              "relay-a",
+		Mode:                config.ModeServer,
+		Identity:            makeDevNodeCert(t, "relay-a"),
+		Listen:              "127.0.0.1:0",
+		Peers:               []config.PeerConfig{{ID: "relay-b", Address: egressAddr, Dial: true}},
+		AllowedRelayClients: []string{"client-2"},
+	}
+	relayAddr, relayErr := startTestServerWithConfig(t, ctx, logger, relayCfg, nil)
+
+	clientCfg := testClientConfig(relayAddr)
+	clientCfg.Servers = []config.ServerConfig{{ID: "relay-a", Address: relayAddr}}
+	conn, err := connectTestClient(ctx, clientCfg, logger)
+	if err != nil {
+		t.Fatalf("expected client to connect: %v", err)
+	}
+	defer conn.CloseWithError(0, "done")
+
+	_, err = OpenTCPStream(ctx, conn, "018ff6f2-5c7b-7d4a-b7f1-9c0e6e7a1234", "echo", "relay-b", []string{"relay-a", "relay-b"})
+	if err == nil {
+		t.Fatal("expected relay ingress authorization error")
+	}
+	var rejected *ConnectRejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("expected ConnectRejectedError, got %T: %v", err, err)
+	}
+	if rejected.Code != protocol.ConnectCodeAccessDenied {
+		t.Fatalf("expected ACCESS_DENIED, got %s", rejected.Code)
+	}
+	if !strings.Contains(rejected.Message, "not allowed to use this node as a relay") {
+		t.Fatalf("unexpected rejection message: %q", rejected.Message)
+	}
+
+	cancelAndWaitForServer(t, cancel, relayErr)
+	cancelAndWaitForServer(t, func() {}, egressErr)
+}
+
 func TestRunProxiesUsingInboundPeerSession(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
