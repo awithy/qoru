@@ -18,6 +18,7 @@ const defaultShutdownWaitTimeout = 5 * time.Second
 type options struct {
 	started        func(addr string)
 	connectRequest func(req protocol.ConnectRequest)
+	peers          *peerSessions
 }
 
 type Option func(*options)
@@ -62,6 +63,13 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 	if opts.started != nil {
 		opts.started(addr)
 	}
+
+	opts.peers = newPeerSessions(cfg, logger)
+	if err := opts.peers.ConnectAll(ctx); err != nil {
+		opts.peers.Close("startup failed")
+		return err
+	}
+	defer opts.peers.Close("server shutdown")
 
 	var connWG sync.WaitGroup
 	for {

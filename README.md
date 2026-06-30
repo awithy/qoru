@@ -25,7 +25,8 @@ TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
 - Named TCP services on the server.
 - Per-service peer authorization.
 - Optional one-hop egress selection.
-- Explicit-route multi-hop TCP forwarding using configured next-hop servers.
+- Explicit-route multi-hop TCP forwarding using configured relay peers.
+- Startup dialing and connection reuse for configured outbound relay peers.
 - Server-side TCP target dialing and byte proxying.
 - SPIFFE-style URI SAN node identities in mTLS certificates.
 - Development certificate generation.
@@ -213,7 +214,7 @@ Near-term:
 - Improve active connection shutdown behavior.
 - Improve service dial failure behavior for local TCP clients.
 - Add better reconnect observability and clearer server-side session handling.
-- Add server-side peer/session management with startup dialing, inbound session registration, connection reuse, and deterministic duplicate-session handling.
+- Add inbound peer session registration and deterministic duplicate-session handling.
 - Improve automated explicit-route multi-hop smoke testing and demo config.
 - Add richer service selection semantics for future multi-egress/load-balanced service routing.
 

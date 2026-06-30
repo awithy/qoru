@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"sync"
 	"time"
@@ -89,7 +88,7 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 	}
 
 	if len(req.Route) > 1 {
-		handleRelayStream(ctx, cfg, peerID, req, stream, logger)
+		handleRelayStream(ctx, cfg, peerID, req, stream, logger, opts)
 		return
 	}
 
@@ -143,39 +142,16 @@ func handleStream(ctx context.Context, cfg *config.Config, peerID string, stream
 	}
 }
 
-func handleRelayStream(ctx context.Context, cfg *config.Config, peerID string, req protocol.ConnectRequest, inbound *quic.Stream, logger *slog.Logger) {
+func handleRelayStream(ctx context.Context, cfg *config.Config, peerID string, req protocol.ConnectRequest, inbound *quic.Stream, logger *slog.Logger, opts options) {
 	nextHop := req.Route[1]
-	peerCfg, ok := findPeer(cfg, nextHop)
-	if !ok {
-		err := fmt.Errorf("next hop %q is not configured", nextHop)
-		if logger != nil {
-			logger.Warn("next hop unreachable", "peer_id", peerID, "next_hop", nextHop, "error", err)
-		}
-		_ = protocol.WriteConnectResponse(inbound, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeNextHopUnreachable, Message: err.Error()})
-		_ = inbound.Close()
-		return
-	}
-
-	tlsConfig, err := identity.ClientTLSConfig(cfg.Identity, nextHop)
-	if err != nil {
+	if opts.peers == nil {
+		err := fmt.Errorf("peer sessions are not initialized")
 		_ = protocol.WriteConnectResponse(inbound, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeInternalError, Message: err.Error()})
 		_ = inbound.Close()
 		return
 	}
-	dialCtx, cancel := context.WithTimeout(ctx, defaultTCPDialTimeout)
-	defer cancel()
-	downstream, err := quic.DialAddr(dialCtx, peerCfg.Address, tlsConfig, &quic.Config{})
-	if err != nil {
-		if logger != nil {
-			logger.Warn("next hop dial failed", "peer_id", peerID, "next_hop", nextHop, "addr", peerCfg.Address, "error", err)
-		}
-		_ = protocol.WriteConnectResponse(inbound, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeNextHopUnreachable, Message: err.Error()})
-		_ = inbound.Close()
-		return
-	}
-	defer downstream.CloseWithError(0, "relay stream closed")
 
-	outbound, err := downstream.OpenStreamSync(ctx)
+	outbound, err := opts.peers.OpenStream(ctx, nextHop)
 	if err != nil {
 		_ = protocol.WriteConnectResponse(inbound, protocol.ConnectResponse{OK: false, Code: protocol.ConnectCodeNextHopUnreachable, Message: err.Error()})
 		_ = inbound.Close()
@@ -204,24 +180,6 @@ func handleRelayStream(ctx context.Context, cfg *config.Config, peerID string, r
 		logger.Info("relay stream connected", "peer_id", peerID, "next_hop", nextHop, "egress", req.Egress, "service", req.Service)
 	}
 	proxyStreams(inbound, outbound)
-}
-
-func findPeer(cfg *config.Config, id string) (config.PeerConfig, bool) {
-	for _, peer := range cfg.Peers {
-		if peer.ID == id {
-			return peer, true
-		}
-	}
-	return config.PeerConfig{}, false
-}
-
-func proxyStreams(a, b *quic.Stream) {
-	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(a, b); _ = a.Close(); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(b, a); _ = b.Close(); done <- struct{}{} }()
-	<-done
-	_ = a.Close()
-	_ = b.Close()
 }
 
 func validateConnectRoute(nodeID string, route []string, egress string) error {

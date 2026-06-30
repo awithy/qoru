@@ -469,7 +469,7 @@ In this model, route forwarding asks for an authenticated peer session by node I
 
 If two peers connect to each other at the same time, duplicate sessions must be resolved deterministically. A likely rule is to keep the connection initiated by the lexicographically lower node ID and close the duplicate. The exact duplicate-session policy is still to be implemented.
 
-Current implementation note: explicit-route relay forwarding works, but an intermediary relay currently dials the next hop on demand for each relayed TCP stream. Direction-independent startup peer sessions and connection reuse are not implemented yet.
+Current implementation note: explicit-route relay forwarding uses outbound peer sessions for configured `dial: true` peers. A server dials those peers at startup, reuses the QUIC connection for relayed streams, and reconnects on demand if opening a stream fails. Inbound session registration and deterministic duplicate-session handling are not implemented yet.
 
 ## Server Runtime
 
@@ -494,7 +494,7 @@ The current server runtime lives in `internal/server`.
 
 For routed requests, the receiving server validates that the first remaining route hop is its own `node_id`. If additional hops remain, it dials the next configured peer, forwards the request with its own hop removed from `route`, relays the downstream `ConnectResponse` back upstream, and then proxies raw bytes between QUIC streams.
 
-Current limitation: relay-to-next-hop QUIC connections are created on demand per relayed TCP stream using `peers[].address`. The intended next evolution is a server-side peer/session manager that establishes configured `dial: true` peer connections at startup, also accepts inbound peer sessions, reuses sessions for forwarding, and treats peer relationships symmetrically regardless of dial direction.
+Current limitation: relay-to-next-hop QUIC connections are reused for configured outbound peer sessions, but accepted inbound peer connections are not registered for forwarding yet. A route can only forward to a peer this node can dial by address. The intended next evolution is inbound peer session registration and deterministic duplicate-session handling so peer relationships are symmetric regardless of dial direction.
 
 ## CLI Runtime Wiring
 
@@ -588,7 +588,7 @@ docs/                  design documentation
 2. Add clearer local TCP behavior when service setup/dialing fails.
 3. Improve reconnect observability and clearer server-side session handling.
 4. Consider configurable log level/log format and timeout settings.
-5. Add server-side peer/session management with startup dialing, inbound session registration, connection reuse, and deterministic duplicate-session handling.
+5. Add inbound peer session registration and deterministic duplicate-session handling.
 6. Improve explicit-route multi-hop smoke tests and demo docs.
 7. Add richer service selection semantics for future multi-egress/load-balanced service routing.
 8. Later: end-to-end encrypted payload frames.
