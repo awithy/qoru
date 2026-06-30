@@ -13,12 +13,25 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-const defaultShutdownWaitTimeout = 5 * time.Second
+const (
+	defaultShutdownWaitTimeout  = 5 * time.Second
+	acceptFailureInitialBackoff = 100 * time.Millisecond
+	acceptFailureMaxBackoff     = 30 * time.Second
+)
 
 type options struct {
 	started        func(addr string)
 	connectRequest func(req protocol.ConnectRequest)
-	peers          *peerSessions
+}
+
+type serverRuntime struct {
+	ctx    context.Context
+	cfg    *config.Config
+	logger *slog.Logger
+	opts   options
+	peers  *peerSessions
+
+	connWG sync.WaitGroup
 }
 
 type Option func(*options)
@@ -36,6 +49,7 @@ func WithConnectRequestFunc(fn func(req protocol.ConnectRequest)) Option {
 }
 
 func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOptions ...Option) error {
+	logger = ensureLogger(logger)
 	if err := config.ValidateServer(cfg); err != nil {
 		return err
 	}
@@ -57,38 +71,55 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger, runOption
 	}
 
 	addr := listener.Addr().String()
-	if logger != nil {
-		logger.Info("server listening", "node_id", cfg.NodeID, "addr", addr)
-	}
+	logger.Info("server listening", "node_id", cfg.NodeID, "addr", addr)
 	if opts.started != nil {
 		opts.started(addr)
 	}
 
-	opts.peers = newPeerSessions(cfg, logger)
-	if err := opts.peers.ConnectAll(ctx); err != nil {
-		opts.peers.Close("startup failed")
+	rt := &serverRuntime{ctx: ctx, cfg: cfg, logger: logger, opts: opts}
+	rt.peers = newPeerSessions(cfg, logger)
+	// Outbound peer connections are bidirectional, so they also need a stream accept loop.
+	rt.peers.onConnected = rt.startConnection
+	if err := rt.peers.ConnectAll(ctx); err != nil {
+		rt.peers.Close("startup failed")
 		return err
 	}
-	defer opts.peers.Close("server shutdown")
-
-	var connWG sync.WaitGroup
+	defer rt.peers.Close("server shutdown")
+	acceptBackoff := acceptFailureInitialBackoff
 	for {
 		conn, err := listener.Accept(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				if waitErr := waitGroupTimeout(&connWG, defaultShutdownWaitTimeout); waitErr != nil {
+				if waitErr := waitGroupTimeout(&rt.connWG, defaultShutdownWaitTimeout); waitErr != nil {
 					return fmt.Errorf("server connection shutdown: %w", waitErr)
 				}
 				return nil
 			}
-			return err
+			logger.Warn("accept connection failed", "backoff", acceptBackoff.String(), "error", err)
+			select {
+			case <-ctx.Done():
+				if waitErr := waitGroupTimeout(&rt.connWG, defaultShutdownWaitTimeout); waitErr != nil {
+					return fmt.Errorf("server connection shutdown: %w", waitErr)
+				}
+				return nil
+			case <-time.After(acceptBackoff):
+			}
+			acceptBackoff *= 2
+			if acceptBackoff > acceptFailureMaxBackoff {
+				acceptBackoff = acceptFailureMaxBackoff
+			}
+			continue
 		}
-		connWG.Add(1)
-		go func() {
-			defer connWG.Done()
-			handleConnection(ctx, cfg, conn, logger, opts)
-		}()
+		acceptBackoff = acceptFailureInitialBackoff
+		// Inbound listener connections use the same stream handling as peer-dialed connections.
+		rt.startConnection(conn)
 	}
+}
+
+func (rt *serverRuntime) startConnection(conn *quic.Conn) {
+	rt.connWG.Go(func() {
+		rt.handleConnection(conn)
+	})
 }
 
 func waitGroupTimeout(wg *sync.WaitGroup, timeout time.Duration) error {

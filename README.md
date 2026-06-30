@@ -26,7 +26,7 @@ TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
 - Per-service peer authorization.
 - Optional one-hop egress selection.
 - Explicit-route multi-hop TCP forwarding using configured relay peers.
-- Startup dialing and connection reuse for configured outbound relay peers.
+- Startup dialing, inbound session registration, and connection reuse for configured relay peers.
 - Server-side TCP target dialing and byte proxying.
 - SPIFFE-style URI SAN node identities in mTLS certificates.
 - Development certificate generation.
@@ -195,6 +195,8 @@ The current implementation has QUIC/mTLS hop-by-hop encryption and authenticatio
 
 If the client-side upstream QUIC connection is lost, active proxied TCP connections on that connection are closed. The qoru client keeps its local listeners running and reconnects on demand for later local TCP connections. Failed reconnect dials use exponential backoff: `500ms`, `1s`, `2s`, `4s`, `8s`, `16s`, capped at `16s`. During backoff, new local TCP connections fail fast without qoru writing diagnostic bytes into the TCP stream.
 
+Server QUIC listener accept failures are retried with exponential backoff starting at `100ms`, capped at `30s`, and reset after a successful accept.
+
 For the current one-hop path:
 
 ```text
@@ -215,7 +217,7 @@ Near-term:
 - Improve active connection shutdown behavior.
 - Improve service dial failure behavior for local TCP clients.
 - Add better reconnect observability and clearer server-side session handling.
-- Add inbound peer session registration and deterministic duplicate-session handling.
+- Add deterministic duplicate-session handling.
 - Improve automated explicit-route multi-hop smoke testing and demo config.
 - Add richer service selection semantics for future multi-egress/load-balanced service routing.
 

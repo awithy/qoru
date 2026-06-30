@@ -15,10 +15,11 @@ import (
 const defaultPeerDialTimeout = 10 * time.Second
 
 type peerSessions struct {
-	nodeID   string
-	identity config.IdentityConfig
-	peers    map[string]config.PeerConfig
-	logger   *slog.Logger
+	nodeID      string
+	identity    config.IdentityConfig
+	peers       map[string]config.PeerConfig
+	logger      *slog.Logger
+	onConnected func(*quic.Conn)
 
 	mu    sync.Mutex
 	conns map[string]*quic.Conn
@@ -42,6 +43,24 @@ func (s *peerSessions) ConnectAll(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (s *peerSessions) RegisterInbound(peerID string, conn *quic.Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.peers[peerID]; !ok {
+		return false
+	}
+	if existing := s.conns[peerID]; existing == conn && existing.Context().Err() == nil {
+		return true
+	}
+	if existing := s.conns[peerID]; existing != nil && existing.Context().Err() == nil {
+		_ = conn.CloseWithError(0, "duplicate peer session")
+		return true
+	}
+	s.conns[peerID] = conn
+	s.logger.Info("peer connected", "peer_id", peerID, "direction", "inbound")
+	return true
 }
 
 func (s *peerSessions) OpenStream(ctx context.Context, peerID string) (*quic.Stream, error) {
@@ -100,9 +119,7 @@ func (s *peerSessions) connection(ctx context.Context, peerID string) (*quic.Con
 	if err != nil {
 		return nil, err
 	}
-	if s.logger != nil {
-		s.logger.Info("peer connected", "peer_id", peerID, "addr", peer.Address, "direction", "outbound")
-	}
+	s.logger.Info("peer connected", "peer_id", peerID, "addr", peer.Address, "direction", "outbound")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -111,6 +128,9 @@ func (s *peerSessions) connection(ctx context.Context, peerID string) (*quic.Con
 		return existing, nil
 	}
 	s.conns[peerID] = dialed
+	if s.onConnected != nil {
+		s.onConnected(dialed)
+	}
 	return dialed, nil
 }
 

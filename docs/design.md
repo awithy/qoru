@@ -396,9 +396,12 @@ Timeouts and reconnect policy are currently hardcoded.
 
 - client QUIC dial timeout: `10s`
 - server TCP target dial timeout: `10s`
+- server QUIC accept failure retry backoff: starts at `100ms`, doubles on consecutive failures, capped at `30s`, and resets after a successful accept
 - client upstream reconnect backoff after failed dial attempts: `500ms`, `1s`, `2s`, `4s`, `8s`, `16s`, capped at `16s`
 
 Server service target dialing uses `net.Dialer.DialContext` and validates configured service targets with `net.SplitHostPort` before dialing. DNS lookup and dial errors are reported through `ConnectResponse`.
+
+The server listener accept loop is resilient to transient QUIC accept failures. If accepting a connection fails while the server context is still active, qoru logs the failure, waits with exponential backoff, and retries instead of immediately shutting down. The backoff resets after a successful accept.
 
 Client reconnect is on demand. qoru does not run a background reconnect loop and does not sleep inside local TCP handlers during backoff. If a local TCP connection arrives while the selected upstream is still in reconnect backoff, stream setup fails fast and the local TCP connection is closed without payload injection.
 
@@ -471,7 +474,7 @@ In this model, route forwarding asks for an authenticated peer session by node I
 
 If two peers connect to each other at the same time, duplicate sessions must be resolved deterministically. A likely rule is to keep the connection initiated by the lexicographically lower node ID and close the duplicate. The exact duplicate-session policy is still to be implemented.
 
-Current implementation note: explicit-route relay forwarding uses outbound peer sessions for configured `dial: true` peers. A server dials those peers at startup, reuses the QUIC connection for relayed streams, and reconnects on demand if opening a stream fails. Inbound connections are accepted and authenticated, but they are not yet registered as reusable peer sessions and are not yet required to appear in `peers`.
+Current implementation note: explicit-route relay forwarding uses peer sessions keyed by authenticated node ID. A server dials configured `dial: true` peers at startup, reuses the QUIC connection for relayed streams, and reconnects on demand if opening a stream fails. Accepted inbound connections from configured peers are also registered as reusable peer sessions, so either side can open streams on the same QUIC connection. Inbound connections from nodes not listed in `peers` are still accepted for normal client/service use, but are not registered as relay peer sessions.
 
 ## Server Runtime
 
@@ -496,7 +499,7 @@ The current server runtime lives in `internal/server`.
 
 For routed requests, the receiving server validates that the first remaining route hop is its own `node_id`. If additional hops remain, it dials the next configured peer, forwards the request with its own hop removed from `route`, relays the downstream `ConnectResponse` back upstream, and then proxies raw bytes between QUIC streams.
 
-Current limitation: relay-to-next-hop QUIC connections are reused for configured outbound peer sessions, but accepted inbound peer connections are not registered for forwarding yet. A route can only forward to a peer this node can dial by address. The intended next evolution is inbound peer session registration and deterministic duplicate-session handling so peer relationships are symmetric regardless of dial direction.
+Current limitation: accepted inbound peer connections are registered for forwarding when the authenticated node ID appears in `peers`, but duplicate-session handling is still simple: an existing live session wins and a duplicate is closed. The intended next evolution is an explicit deterministic duplicate-session policy so peer relationships are fully symmetric regardless of dial direction.
 
 ## CLI Runtime Wiring
 
@@ -597,7 +600,7 @@ docs/                  design documentation
 2. Add clearer local TCP behavior when service setup/dialing fails.
 3. Improve reconnect observability and clearer server-side session handling.
 4. Consider configurable log level/log format and timeout settings.
-5. Add inbound peer session registration and deterministic duplicate-session handling.
+5. Add deterministic duplicate-session handling.
 6. Improve explicit-route multi-hop smoke tests and demo docs.
 7. Add richer service selection semantics for future multi-egress/load-balanced service routing.
 8. Later: end-to-end encrypted payload frames.
