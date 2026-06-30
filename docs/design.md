@@ -621,7 +621,7 @@ MaxE2EFinishedSignatureLength = 8192
 MaxE2ENonceSuffixLength       = 24
 ```
 
-The handshake core uses X25519 ephemeral keys, certificate signatures, a transcript bound to `request_id`, `service`, `egress`, `route`, and both ephemeral keys, plus HKDF-derived directional traffic keys. Runtime negotiation, AEAD record encryption, nonce construction, close-code semantics, and integration with `ConnectRequest` negotiation are still open design items.
+The handshake core uses X25519 ephemeral keys, certificate signatures, a transcript bound to `request_id`, `service`, `egress`, `route`, and both ephemeral keys, plus HKDF-derived directional traffic keys. The encrypted record-layer helper uses AES-GCM, directional keys, 8-byte big-endian sequence nonce suffixes, strict in-order sequence checks, transcript-bound associated data, and `E2EClose` for encrypted-mode EOF signaling. Runtime negotiation, runtime half-close integration, close-code policy, and integration with `ConnectRequest` negotiation are still open design items.
 
 Current TCP stream model:
 
@@ -635,7 +635,7 @@ The setup/control phase is framed. Once the server confirms success, the remaini
 
 TCP proxying is half-close-aware. When one copy direction reaches EOF, qoru gracefully closes only the opposite write side and lets the other direction continue so request-then-half-close protocols can still receive responses. Unexpected copy or half-close errors abort both endpoints to unblock the paired copy direction.
 
-Future multi-hop/end-to-end encryption will require framed encrypted data messages after an E2E service-identity handshake. The current implementation keeps raw bytes after the initial setup handshake.
+Future multi-hop/end-to-end encryption will require framed encrypted data messages after an E2E service-identity handshake. The current runtime keeps raw bytes after the initial setup handshake because E2E runtime negotiation is not wired yet; when E2E runtime support is added, qoru should not support a mode that performs the E2E handshake and then carries plaintext application payload.
 
 ## Timeouts and Reconnect Backoff
 

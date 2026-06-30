@@ -39,7 +39,7 @@ const (
 	MaxE2ESignatureLength         = 8192
 	MaxE2EFinishedSignatureLength = MaxE2ESignatureLength
 	MaxE2ENonceSuffixLength       = 24
-	MaxE2ECiphertextLength        = MaxPayloadSize - 3
+	MaxE2ECiphertextLength        = MaxPayloadSize - 1 - MaxE2ENonceSuffixLength - 2
 	MaxE2ECloseMessageLength      = MaxPayloadSize - 3
 )
 
@@ -537,11 +537,15 @@ func ReadE2EData(r io.Reader) (E2EData, error) {
 	if frame.Type != TypeE2EData {
 		return E2EData{}, fmt.Errorf("unexpected message type %d", frame.Type)
 	}
-	if len(frame.Payload) < 4 {
+	return DecodeE2EDataPayload(frame.Payload)
+}
+
+func DecodeE2EDataPayload(payload []byte) (E2EData, error) {
+	if len(payload) < 4 {
 		return E2EData{}, fmt.Errorf("malformed e2e data payload")
 	}
 	offset := 0
-	nonceLen := int(frame.Payload[offset])
+	nonceLen := int(payload[offset])
 	if nonceLen == 0 {
 		return E2EData{}, fmt.Errorf("nonce suffix is required")
 	}
@@ -549,12 +553,12 @@ func ReadE2EData(r io.Reader) (E2EData, error) {
 		return E2EData{}, fmt.Errorf("nonce suffix too long: %d > %d", nonceLen, MaxE2ENonceSuffixLength)
 	}
 	offset++
-	if len(frame.Payload) < offset+nonceLen+2 {
+	if len(payload) < offset+nonceLen+2 {
 		return E2EData{}, fmt.Errorf("malformed e2e data payload: missing ciphertext length")
 	}
-	nonce := append([]byte(nil), frame.Payload[offset:offset+nonceLen]...)
+	nonce := append([]byte(nil), payload[offset:offset+nonceLen]...)
 	offset += nonceLen
-	ciphertextLen := int(binary.BigEndian.Uint16(frame.Payload[offset : offset+2]))
+	ciphertextLen := int(binary.BigEndian.Uint16(payload[offset : offset+2]))
 	if ciphertextLen == 0 {
 		return E2EData{}, fmt.Errorf("ciphertext is required")
 	}
@@ -562,10 +566,10 @@ func ReadE2EData(r io.Reader) (E2EData, error) {
 		return E2EData{}, fmt.Errorf("ciphertext too long: %d > %d", ciphertextLen, MaxE2ECiphertextLength)
 	}
 	offset += 2
-	if len(frame.Payload[offset:]) != ciphertextLen {
+	if len(payload[offset:]) != ciphertextLen {
 		return E2EData{}, fmt.Errorf("malformed e2e data payload: ciphertext length mismatch")
 	}
-	ciphertext := append([]byte(nil), frame.Payload[offset:]...)
+	ciphertext := append([]byte(nil), payload[offset:]...)
 	return E2EData{NonceSuffix: nonce, Ciphertext: ciphertext}, nil
 }
 
@@ -601,17 +605,21 @@ func ReadE2EClose(r io.Reader) (E2EClose, error) {
 	if frame.Type != TypeE2EClose {
 		return E2EClose{}, fmt.Errorf("unexpected message type %d", frame.Type)
 	}
-	if len(frame.Payload) < 3 {
+	return DecodeE2EClosePayload(frame.Payload)
+}
+
+func DecodeE2EClosePayload(payload []byte) (E2EClose, error) {
+	if len(payload) < 3 {
 		return E2EClose{}, fmt.Errorf("malformed e2e close payload")
 	}
-	messageLen := int(binary.BigEndian.Uint16(frame.Payload[1:3]))
+	messageLen := int(binary.BigEndian.Uint16(payload[1:3]))
 	if messageLen > MaxE2ECloseMessageLength {
 		return E2EClose{}, fmt.Errorf("close message too long: %d > %d", messageLen, MaxE2ECloseMessageLength)
 	}
-	if len(frame.Payload[3:]) != messageLen {
+	if len(payload[3:]) != messageLen {
 		return E2EClose{}, fmt.Errorf("malformed e2e close payload: message length mismatch")
 	}
-	return E2EClose{Code: frame.Payload[0], Message: string(frame.Payload[3:])}, nil
+	return E2EClose{Code: payload[0], Message: string(payload[3:])}, nil
 }
 
 func ReadE2EClientFinished(r io.Reader) (E2EClientFinished, error) {

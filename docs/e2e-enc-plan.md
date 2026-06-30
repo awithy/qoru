@@ -265,7 +265,7 @@ Implemented core pieces:
 
 ## Slice 7: Encrypted Data Frames
 
-Status: not started.
+Status: in progress. The in-memory encrypted record reader/writer is implemented and tested. Runtime wiring is not implemented yet.
 
 Replace raw post-connect TCP bytes with encrypted payload frames.
 
@@ -292,22 +292,18 @@ Future encrypted stream shape may be:
 Implementation direction:
 
 ```go
-type EncryptedStreamReader struct { ... }
-type EncryptedStreamWriter struct { ... }
+type EncryptedReader struct { ... }
+type EncryptedWriter struct { ... }
 ```
 
-Then the existing proxying model can remain conceptually similar, but local TCP is proxied to encrypted stream wrappers instead of directly to the raw QUIC stream.
+The implemented record layer uses AES-GCM with handshake-derived directional 32-byte keys, 8-byte big-endian sequence nonce suffixes, strict in-order sequence checks, transcript-bound AEAD associated data, and `E2EClose` for encrypted-mode EOF signaling. Then the existing proxying model can remain conceptually similar, but local TCP is proxied to encrypted stream wrappers instead of directly to the raw QUIC stream.
 
 Open design items:
 
-- exact frame ordering
-- whether handshake data is carried in existing response frames or new frame types
-- AEAD choice
-- key schedule
-- nonce construction
-- close/error frame semantics
-- max encrypted record size
-- half-close behavior over encrypted frames
+- exact runtime frame ordering and negotiation
+- whether handshake readiness is carried in existing response frames or new frame types
+- runtime half-close integration over encrypted frames
+- runtime error mapping and logging
 
 ## Slice 8: Require and Enforce E2E Policy
 
