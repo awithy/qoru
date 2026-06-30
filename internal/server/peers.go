@@ -42,6 +42,12 @@ func (e *PeerReconnectBackoffError) Unwrap() error {
 	return e.Err
 }
 
+type peerReconnectState struct {
+	nextDial    time.Time
+	lastDialErr error
+	failCount   int
+}
+
 type peerSessions struct {
 	nodeID      string
 	identity    config.IdentityConfig
@@ -49,12 +55,10 @@ type peerSessions struct {
 	logger      *slog.Logger
 	onConnected func(*quic.Conn)
 
-	mu               sync.Mutex
-	conns            map[string]*quic.Conn
-	nextDial         map[string]time.Time
-	lastDialErr      map[string]error
-	backoffFailCount map[string]int
-	now              func() time.Time
+	mu        sync.Mutex
+	conns     map[string]*quic.Conn
+	reconnect map[string]*peerReconnectState
+	now       func() time.Time
 }
 
 func newPeerSessions(cfg *config.Config, logger *slog.Logger) *peerSessions {
@@ -63,15 +67,13 @@ func newPeerSessions(cfg *config.Config, logger *slog.Logger) *peerSessions {
 		peers[peer.ID] = peer
 	}
 	return &peerSessions{
-		nodeID:           cfg.NodeID,
-		identity:         cfg.Identity,
-		peers:            peers,
-		logger:           logger,
-		conns:            make(map[string]*quic.Conn),
-		nextDial:         make(map[string]time.Time),
-		lastDialErr:      make(map[string]error),
-		backoffFailCount: make(map[string]int),
-		now:              time.Now,
+		nodeID:    cfg.NodeID,
+		identity:  cfg.Identity,
+		peers:     peers,
+		logger:    logger,
+		conns:     make(map[string]*quic.Conn),
+		reconnect: make(map[string]*peerReconnectState),
+		now:       time.Now,
 	}
 }
 
@@ -155,8 +157,9 @@ func (s *peerSessions) connection(ctx context.Context, peerID string) (*quic.Con
 		return nil, fmt.Errorf("peer %q has no dial address", peerID)
 	}
 	now := s.now()
-	if next := s.nextDial[peerID]; !next.IsZero() && now.Before(next) {
-		err := &PeerReconnectBackoffError{PeerID: peerID, Address: peer.Address, NextAttempt: next, Err: s.lastDialErr[peerID]}
+	state := s.reconnect[peerID]
+	if state != nil && !state.nextDial.IsZero() && now.Before(state.nextDial) {
+		err := &PeerReconnectBackoffError{PeerID: peerID, Address: peer.Address, NextAttempt: state.nextDial, Err: state.lastDialErr}
 		s.mu.Unlock()
 		return nil, err
 	}
@@ -222,7 +225,11 @@ func (s *peerSessions) maintainConnection(ctx context.Context, peerID string) {
 
 func (s *peerSessions) sleepUntilNextDial(ctx context.Context, peerID string) {
 	s.mu.Lock()
-	next := s.nextDial[peerID]
+	state := s.reconnect[peerID]
+	var next time.Time
+	if state != nil {
+		next = state.nextDial
+	}
 	now := s.now()
 	s.mu.Unlock()
 
@@ -242,22 +249,25 @@ func (s *peerSessions) recordDialFailure(peerID string, peer config.PeerConfig, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	delay := peerReconnectBackoffAfterFailure[len(peerReconnectBackoffAfterFailure)-1]
-	if s.backoffFailCount[peerID] < len(peerReconnectBackoffAfterFailure) {
-		delay = peerReconnectBackoffAfterFailure[s.backoffFailCount[peerID]]
+	state := s.reconnect[peerID]
+	if state == nil {
+		state = &peerReconnectState{}
+		s.reconnect[peerID] = state
 	}
-	s.backoffFailCount[peerID]++
-	s.nextDial[peerID] = now.Add(delay)
-	s.lastDialErr[peerID] = err
+	delay := peerReconnectBackoffAfterFailure[len(peerReconnectBackoffAfterFailure)-1]
+	if state.failCount < len(peerReconnectBackoffAfterFailure) {
+		delay = peerReconnectBackoffAfterFailure[state.failCount]
+	}
+	state.failCount++
+	state.nextDial = now.Add(delay)
+	state.lastDialErr = err
 	if s.logger != nil {
-		s.logger.Warn("peer reconnect scheduled", "peer_id", peerID, "addr", peer.Address, "backoff", delay.String(), "next_attempt", s.nextDial[peerID].Format(time.RFC3339Nano), "error", err)
+		s.logger.Warn("peer reconnect scheduled", "peer_id", peerID, "addr", peer.Address, "backoff", delay.String(), "next_attempt", state.nextDial.Format(time.RFC3339Nano), "error", err)
 	}
 }
 
 func (s *peerSessions) resetDialBackoff(peerID string) {
-	delete(s.nextDial, peerID)
-	delete(s.lastDialErr, peerID)
-	delete(s.backoffFailCount, peerID)
+	delete(s.reconnect, peerID)
 }
 
 func (s *peerSessions) drop(peerID string, conn *quic.Conn, reason string) {
