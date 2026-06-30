@@ -106,9 +106,60 @@ forwards:
     service: postgres-prod
 ```
 
-In this mode, qoru may eventually choose an eligible egress node and route automatically. This enables service-level load balancing, failover, and topology-aware routing when multiple egress nodes can provide the same service.
+Conceptually:
 
-A client may also constrain the egress node while still allowing qoru to choose the path to that egress:
+- `service` is what the client wants.
+- `egress` optionally constrains where traffic must exit.
+- `route` optionally constrains the exact hop sequence.
+- if neither `egress` nor `route` is set, qoru may choose from configured or discovered candidates.
+- if `route` is set, the last hop is the egress node.
+- if both `route` and `egress` are set, they must agree.
+- authorization policy can still reject any automatic, selected, or explicit routing decision.
+
+This model supports both automatic routing and client-specified routing without making either one mandatory. The current implementation is intentionally narrower: service names are resolved on the selected direct upstream server, and with multiple configured upstream servers the client must set `egress` explicitly.
+
+### Static service route candidates
+
+The next routing step should be a minimal static service-first routing layer, not full dynamic topology discovery. The client should be able to map a requested service to one or more candidate egress paths and select one candidate per local TCP connection before opening the QUIC stream.
+
+Example future shape:
+
+```yaml
+routes:
+  - service: echo
+    candidates:
+      - egress: relay-b
+        route: [relay-a, relay-b]
+      - egress: relay-c
+        route: [relay-a, relay-c]
+```
+
+Then a forward can identify only the service:
+
+```yaml
+forwards:
+  - protocol: tcp
+    listen: 127.0.0.1:15432
+    service: echo
+```
+
+For each accepted local connection, the client selects one candidate and sends the existing logical request fields:
+
+```text
+service = echo
+egress  = relay-b
+route   = [relay-a, relay-b]
+```
+
+Initial candidate selection can be simple and local to the client, such as ordered failover, round-robin, or random selection. There is no per-byte overhead and no relay behavior change required as long as the client resolves the concrete `egress` and `route` before sending `ConnectRequest`.
+
+Once a connection has started proxying, qoru should not attempt mid-connection failover. If setup fails before proxying begins, the client may try another candidate depending on selection policy and failure class.
+
+This static candidate model deliberately avoids dynamic service advertisement, health-aware route discovery, topology maps, and load/cost-aware routing for now. Those capabilities can be added later as a control plane. Even when dynamic advertisement exists, advertised service reachability should be treated as a hint; the egress still needs to prove service identity during the end-to-end encryption handshake.
+
+### Explicit constraints
+
+A client may still constrain the egress node while allowing qoru to choose or look up a path to that egress:
 
 ```yaml
 forwards:
@@ -120,7 +171,7 @@ forwards:
 
 In this mode, `egress` means "the service must exit at this node." It is a routing constraint, not the service identity itself.
 
-For multi-hop topologies, a client may eventually specify an explicit route:
+For multi-hop topologies, a client may specify an explicit route:
 
 ```yaml
 forwards:
@@ -144,18 +195,6 @@ forwards:
       - relay-a
       - relay-b
 ```
-
-Conceptually:
-
-- `service` is what the client wants.
-- `egress` optionally constrains where traffic must exit.
-- `route` optionally constrains the exact hop sequence.
-- if neither `egress` nor `route` is set, qoru may choose automatically.
-- if `route` is set, the last hop is the egress node.
-- if both `route` and `egress` are set, they must agree.
-- authorization policy can still reject any automatic or explicit routing decision.
-
-This model supports both automatic routing and client-specified routing without making either one mandatory. The current implementation is intentionally narrower: service names are resolved on the selected direct upstream server, and with multiple configured upstream servers the client must set `egress` explicitly.
 
 ## Configuration
 
@@ -354,6 +393,71 @@ URI:spiffe://qoru/node/server-1
 
 The node ID is extracted from the URI SAN and used as the authenticated peer identity. DNS SANs and certificate Common Names are not used for qoru node identity.
 
+## End-to-End Service Identity and Payload Encryption
+
+The target end-to-end encryption model separates node identity from service identity:
+
+```text
+QUIC/mTLS identity:     spiffe://qoru/node/relay-b
+E2E payload identity:   spiffe://qoru/service/postgres-prod
+```
+
+QUIC/mTLS remains hop-by-hop and authenticates adjacent nodes. End-to-end payload encryption should be bound to the requested service, not to a specific egress node. This allows multiple egress nodes to serve the same logical service without sharing a private key.
+
+Each eligible egress node may have its own service certificate and private key. Multiple certificates may assert the same service URI SAN, for example:
+
+```text
+relay-b service cert: URI:spiffe://qoru/service/echo
+relay-c service cert: URI:spiffe://qoru/service/echo
+```
+
+The client verifies that the selected egress proves possession of a private key for a certificate trusted for `spiffe://qoru/service/<service>`. The service certificate proves "what service is being terminated," while the route and mTLS layer determine "where the stream is forwarded."
+
+The design should skip a shared service private-key model. Sharing one service private key across multiple egress nodes is simpler, but it increases blast radius, complicates rotation/revocation, and weakens isolation between egress nodes.
+
+### E2E handshake target
+
+For each proxied connection, after route selection but before application payload proxying, ingress and egress should perform an authenticated ephemeral key exchange through the selected route:
+
+```text
+client -> egress, via relays: ConnectRequest(service, egress, route, ...)
+client <-> egress: E2E handshake messages
+egress proves service identity with service cert chain and ephemeral key
+client proves original ingress identity with client node cert and ephemeral key
+client verifies service identity == spiffe://qoru/service/<service>
+client and egress derive per-connection traffic keys
+encrypted framed payload begins
+```
+
+Both sides should bind signatures and key derivation to the handshake transcript, including at least `request_id`, `service`, selected `egress`, selected `route`, client ephemeral key, and egress ephemeral key. This prevents relays or confused endpoints from replaying a hello into a different request context.
+
+The egress should authenticate the original ingress client at the E2E layer, not only the previous-hop relay observed through mTLS. This preserves separate policy layers:
+
+```text
+Relay authorization:       can this previous hop forward through this node?
+Service authorization:     can this original client use this service?
+```
+
+Current `services[].peers` authorization is based on the authenticated direct peer. With E2E service authentication, final service authorization should be able to evaluate the original client identity from `ClientHello`.
+
+### E2E encrypted data framing
+
+The current stream model switches to raw TCP bytes after `ConnectResponse`. End-to-end payload encryption requires replacing raw bytes with framed encrypted records after the E2E handshake. Intermediary relays should continue to forward opaque stream bytes after setup and should not need access to plaintext TCP payloads.
+
+A future encrypted stream shape may be:
+
+```text
+[ConnectRequest frame]
+[ConnectResponse or E2E-ready frame]
+[E2E ClientHello frame]
+[E2E ServerHello frame]
+[encrypted data frame]
+[encrypted data frame]
+...
+```
+
+The exact ordering of `ConnectResponse` relative to the E2E handshake, whether handshake material is carried in existing response frames or new frame types, AEAD choice, key schedule, and close/error semantics are still open design items. In encrypted mode, final service authorization and target dialing should happen only after the egress authenticates the original ingress client.
+
 ## ALPN
 
 ALPN is Application-Layer Protocol Negotiation. qoru currently advertises:
@@ -453,7 +557,7 @@ The setup/control phase is framed. Once the server confirms success, the remaini
 
 TCP proxying is half-close-aware. When one copy direction reaches EOF, qoru gracefully closes only the opposite write side and lets the other direction continue so request-then-half-close protocols can still receive responses. Unexpected copy or half-close errors abort both endpoints to unblock the paired copy direction.
 
-Future multi-hop/end-to-end encryption will likely require framed encrypted data messages, but the current one-hop TCP implementation keeps raw bytes after the initial setup handshake.
+Future multi-hop/end-to-end encryption will require framed encrypted data messages after an E2E service-identity handshake. The current implementation keeps raw bytes after the initial setup handshake.
 
 ## Timeouts and Reconnect Backoff
 
@@ -672,10 +776,11 @@ docs/                  design documentation
 
 ## Near-Term Next Steps
 
-1. Add clearer local TCP behavior when service setup/dialing fails.
-2. Improve reconnect observability and clearer server-side session handling.
-3. Consider configurable log level/log format and timeout settings.
-4. Improve duplicate peer-session diagnostics and validation where possible.
-5. Improve explicit-route multi-hop smoke tests and demo docs.
-6. Add richer service selection semantics for future multi-egress/load-balanced service routing.
-7. Later: end-to-end encrypted payload frames.
+Current priority is to advance service-first routing and end-to-end payload encryption while deferring broader operability, topology/control-plane, and UDP work.
+
+1. Add a minimal static service route-candidate model so a forward can request a service and the client can select an egress/route candidate per connection.
+2. Support multiple static candidates for the same service, with simple selection such as ordered failover, round-robin, or random.
+3. Add service identity certificates using SPIFFE-style service URI SANs such as `spiffe://qoru/service/echo`.
+4. Add an E2E handshake where the egress proves service identity with its own service cert/key and the ingress proves original client identity.
+5. Replace raw post-connect TCP bytes with encrypted framed payload records between ingress and egress.
+6. Later: dynamic service advertisement/topology, richer health-aware route selection, and UDP support.
