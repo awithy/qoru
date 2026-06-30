@@ -25,19 +25,22 @@ func newRouteResolver(cfg *config.Config) *routeResolver {
 	return &routeResolver{routes: routes}
 }
 
-func (r *routeResolver) resolve(forward config.ForwardConfig) selectedRoute {
+func (r *routeResolver) resolveCandidates(forward config.ForwardConfig) []selectedRoute {
 	selected := selectedRoute{service: forward.Service, egress: forward.Egress, route: copyRoute(forward.Route)}
 	if len(forward.Route) > 0 || forward.Egress != "" || r == nil {
-		return selected
+		return []selectedRoute{selected}
 	}
 
 	serviceRoute, ok := r.routes[routeKey{protocol: forward.Protocol, service: forward.Service}]
 	if !ok || len(serviceRoute.Candidates) == 0 {
-		return selected
+		return []selectedRoute{selected}
 	}
 
-	candidate := serviceRoute.Candidates[0]
-	return selectedRoute{service: forward.Service, egress: candidate.Egress, route: copyRoute(candidate.Route)}
+	candidates := make([]selectedRoute, 0, len(serviceRoute.Candidates))
+	for _, candidate := range serviceRoute.Candidates {
+		candidates = append(candidates, selectedRoute{service: forward.Service, egress: candidate.Egress, route: copyRoute(candidate.Route)})
+	}
+	return candidates
 }
 
 func copyRoute(route []string) []string {

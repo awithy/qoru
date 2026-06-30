@@ -1,13 +1,15 @@
 package client
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/awithy/qoru/internal/config"
+	"github.com/awithy/qoru/internal/protocol"
 )
 
-func TestRouteResolverSelectsFirstStaticCandidate(t *testing.T) {
+func TestRouteResolverSelectsStaticCandidates(t *testing.T) {
 	resolver := newRouteResolver(&config.Config{Routes: []config.ServiceRouteConfig{{
 		Service:  "echo",
 		Protocol: "tcp",
@@ -17,8 +19,11 @@ func TestRouteResolverSelectsFirstStaticCandidate(t *testing.T) {
 		},
 	}}})
 
-	selected := resolver.resolve(config.ForwardConfig{Protocol: "tcp", Service: "echo"})
-	assertSelectedRoute(t, selected, "echo", "relay-b", []string{"relay-a", "relay-b"})
+	candidates := resolver.resolveCandidates(config.ForwardConfig{Protocol: "tcp", Service: "echo"})
+	assertRouteCandidates(t, candidates,
+		selectedRoute{service: "echo", egress: "relay-b", route: []string{"relay-a", "relay-b"}},
+		selectedRoute{service: "echo", egress: "relay-c", route: []string{"relay-a", "relay-c"}},
+	)
 }
 
 func TestRouteResolverExplicitRouteWinsOverStaticRoute(t *testing.T) {
@@ -28,8 +33,8 @@ func TestRouteResolverExplicitRouteWinsOverStaticRoute(t *testing.T) {
 		Candidates: []config.RouteCandidateConfig{{Egress: "relay-b", Route: []string{"relay-a", "relay-b"}}},
 	}}})
 
-	selected := resolver.resolve(config.ForwardConfig{Protocol: "tcp", Service: "echo", Egress: "relay-d", Route: []string{"relay-a", "relay-d"}})
-	assertSelectedRoute(t, selected, "echo", "relay-d", []string{"relay-a", "relay-d"})
+	candidates := resolver.resolveCandidates(config.ForwardConfig{Protocol: "tcp", Service: "echo", Egress: "relay-d", Route: []string{"relay-a", "relay-d"}})
+	assertRouteCandidates(t, candidates, selectedRoute{service: "echo", egress: "relay-d", route: []string{"relay-a", "relay-d"}})
 }
 
 func TestRouteResolverExplicitEgressWinsOverStaticRoute(t *testing.T) {
@@ -39,8 +44,8 @@ func TestRouteResolverExplicitEgressWinsOverStaticRoute(t *testing.T) {
 		Candidates: []config.RouteCandidateConfig{{Egress: "relay-b", Route: []string{"relay-a", "relay-b"}}},
 	}}})
 
-	selected := resolver.resolve(config.ForwardConfig{Protocol: "tcp", Service: "echo", Egress: "server-1"})
-	assertSelectedRoute(t, selected, "echo", "server-1", nil)
+	candidates := resolver.resolveCandidates(config.ForwardConfig{Protocol: "tcp", Service: "echo", Egress: "server-1"})
+	assertRouteCandidates(t, candidates, selectedRoute{service: "echo", egress: "server-1"})
 }
 
 func TestRouteResolverFallsBackToForwardWhenNoStaticRouteMatches(t *testing.T) {
@@ -50,13 +55,41 @@ func TestRouteResolverFallsBackToForwardWhenNoStaticRouteMatches(t *testing.T) {
 		Candidates: []config.RouteCandidateConfig{{Egress: "relay-b", Route: []string{"relay-a", "relay-b"}}},
 	}}})
 
-	selected := resolver.resolve(config.ForwardConfig{Protocol: "tcp", Service: "echo-a"})
-	assertSelectedRoute(t, selected, "echo-a", "", nil)
+	candidates := resolver.resolveCandidates(config.ForwardConfig{Protocol: "tcp", Service: "echo-a"})
+	assertRouteCandidates(t, candidates, selectedRoute{service: "echo-a"})
 }
 
-func assertSelectedRoute(t *testing.T, selected selectedRoute, service, egress string, route []string) {
+func TestIsRetryableSetupError(t *testing.T) {
+	if !isRetryableSetupError(errors.New("transport failed")) {
+		t.Fatal("expected transport errors to be retryable")
+	}
+	retryableCodes := []protocol.ConnectCode{
+		protocol.ConnectCodeUnreachableEgress,
+		protocol.ConnectCodeNextHopUnreachable,
+		protocol.ConnectCodeTargetDialFailed,
+	}
+	for _, code := range retryableCodes {
+		if !isRetryableSetupError(&ConnectRejectedError{Code: code}) {
+			t.Fatalf("expected %s to be retryable", code)
+		}
+	}
+	nonRetryableCodes := []protocol.ConnectCode{
+		protocol.ConnectCodeAccessDenied,
+		protocol.ConnectCodeServiceNotFound,
+		protocol.ConnectCodeUnsupportedProtocol,
+		protocol.ConnectCodeRouteInvalid,
+		protocol.ConnectCodeInternalError,
+	}
+	for _, code := range nonRetryableCodes {
+		if isRetryableSetupError(&ConnectRejectedError{Code: code}) {
+			t.Fatalf("expected %s to be non-retryable", code)
+		}
+	}
+}
+
+func assertRouteCandidates(t *testing.T, candidates []selectedRoute, expected ...selectedRoute) {
 	t.Helper()
-	if selected.service != service || selected.egress != egress || !reflect.DeepEqual(selected.route, route) {
-		t.Fatalf("unexpected selected route: %#v", selected)
+	if !reflect.DeepEqual(candidates, expected) {
+		t.Fatalf("unexpected route candidates: got %#v want %#v", candidates, expected)
 	}
 }

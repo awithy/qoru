@@ -224,7 +224,7 @@ forwards:
 
 The client requests a named service. Service names are currently resolved on the selected direct upstream server for one-hop requests, or on the final route hop for explicit-route requests. `egress` is optional when exactly one upstream server is configured and no explicit route is used; empty means that server may satisfy the request. When multiple upstream servers are configured and no explicit route is used, each forward must set `egress` to one configured server ID. For explicit routes, the first route hop selects the direct upstream server, and `egress`, if set, must match the final route hop.
 
-Static service route candidate configuration is implemented in config loading, validation, and basic client runtime resolution. The client currently selects the first configured candidate for a matching `protocol` and `service`. Candidate fallback and non-ordered selection policies are planned next.
+Static service route candidate configuration is implemented in config loading, validation, and basic client runtime resolution. For `selection: ordered`, the client tries matching route candidates in order. If stream setup fails before payload proxying begins with a retryable setup error, the client tries the next candidate. Candidate fallback does not happen after payload proxying begins. Non-ordered selection policies are planned later.
 
 A forward may include a `route` field for explicit multi-hop routing. The first hop must be a configured direct upstream server. The final hop is the egress node:
 

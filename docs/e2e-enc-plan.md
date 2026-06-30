@@ -109,6 +109,8 @@ The existing `ConnectRequest` fields can still be used once a concrete candidate
 
 ## Slice 3: Candidate Selection and Setup-Time Fallback
 
+Status: implemented for `ordered` setup-time fallback. Non-ordered policies are not implemented yet.
+
 Start with simple `ordered` selection.
 
 Behavior:

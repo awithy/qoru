@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/awithy/qoru/internal/config"
+	"github.com/awithy/qoru/internal/protocol"
 	"github.com/awithy/qoru/internal/requestid"
 )
 
@@ -123,11 +124,11 @@ func acceptForward(ctx context.Context, session upstreamSession, routes *routeRe
 			errCh <- err
 			return
 		}
-		selected := routes.resolve(forward)
+		candidates := routes.resolveCandidates(forward)
 		handlerWG.Add(1)
 		go func() {
 			defer handlerWG.Done()
-			handleLocalConnection(ctx, session, selected.service, selected.egress, selected.route, localConn, logger)
+			handleLocalConnection(ctx, session, candidates, localConn, logger)
 		}()
 	}
 }
@@ -147,40 +148,69 @@ func waitGroupTimeout(wg *sync.WaitGroup, timeout time.Duration) error {
 	}
 }
 
-func handleLocalConnection(ctx context.Context, session upstreamSession, service, egress string, route []string, localConn net.Conn, logger *slog.Logger) {
+func handleLocalConnection(ctx context.Context, session upstreamSession, candidates []selectedRoute, localConn net.Conn, logger *slog.Logger) {
 	logger = ensureLogger(logger)
 	defer localConn.Close()
+	if len(candidates) == 0 {
+		logger.Error("no route candidates available", "local_addr", localConn.LocalAddr().String(), "remote_addr", localConn.RemoteAddr().String())
+		return
+	}
 
 	requestID, err := requestid.New()
 	if err != nil {
-		logger.Error("generate request id failed", "service", service, "egress", egress, "route", route, "error", err)
+		logger.Error("generate request id failed", "service", candidates[0].service, "error", err)
 		return
 	}
-	logger = logger.With("request_id", requestID, "service", service, "egress", egress, "route", route, "local_addr", localConn.LocalAddr().String(), "remote_addr", localConn.RemoteAddr().String())
+	logger = logger.With("request_id", requestID, "local_addr", localConn.LocalAddr().String(), "remote_addr", localConn.RemoteAddr().String(), "route_candidate_count", len(candidates))
 	logger.Info("local tcp connection accepted")
 
-	stream, err := session.OpenTCPStream(ctx, requestID, service, egress, route)
-	if err != nil {
-		var rejected *ConnectRejectedError
-		var backoff *ReconnectBackoffError
-		switch {
-		case errors.As(err, &rejected):
-			logger.Warn("tcp service rejected", "response_code", rejected.Code.String(), "error", err)
-		case errors.As(err, &backoff):
-			logger.Warn(
-				"upstream reconnect backoff active",
-				"server_id", backoff.ServerID,
-				"addr", backoff.Address,
-				"next_attempt", backoff.NextAttempt.Format(time.RFC3339Nano),
-				"error", err,
-			)
-		default:
-			logger.Error("open tcp stream failed", "error", err)
+	for i, candidate := range candidates {
+		candidateLogger := logger.With("service", candidate.service, "egress", candidate.egress, "route", candidate.route, "route_candidate", i+1)
+		stream, err := session.OpenTCPStream(ctx, requestID, candidate.service, candidate.egress, candidate.route)
+		if err == nil {
+			candidateLogger.Info("tcp stream connected")
+			proxyTCP(localConn, stream)
+			candidateLogger.Info("local tcp proxy closed")
+			return
 		}
-		return
-	}
 
-	logger.Info("tcp stream connected")
-	proxyTCP(localConn, stream)
-	logger.Info("local tcp proxy closed")
+		retry := ctx.Err() == nil && i+1 < len(candidates) && isRetryableSetupError(err)
+		logOpenTCPStreamFailed(candidateLogger, err, retry)
+		if !retry {
+			return
+		}
+	}
+}
+
+func logOpenTCPStreamFailed(logger *slog.Logger, err error, retryNextCandidate bool) {
+	var rejected *ConnectRejectedError
+	var backoff *ReconnectBackoffError
+	switch {
+	case errors.As(err, &rejected):
+		logger.Warn("tcp service rejected", "response_code", rejected.Code.String(), "retry_next_candidate", retryNextCandidate, "error", err)
+	case errors.As(err, &backoff):
+		logger.Warn(
+			"upstream reconnect backoff active",
+			"server_id", backoff.ServerID,
+			"addr", backoff.Address,
+			"next_attempt", backoff.NextAttempt.Format(time.RFC3339Nano),
+			"retry_next_candidate", retryNextCandidate,
+			"error", err,
+		)
+	default:
+		logger.Error("open tcp stream failed", "retry_next_candidate", retryNextCandidate, "error", err)
+	}
+}
+
+func isRetryableSetupError(err error) bool {
+	var rejected *ConnectRejectedError
+	if !errors.As(err, &rejected) {
+		return true
+	}
+	switch rejected.Code {
+	case protocol.ConnectCodeUnreachableEgress, protocol.ConnectCodeNextHopUnreachable, protocol.ConnectCodeTargetDialFailed:
+		return true
+	default:
+		return false
+	}
 }
