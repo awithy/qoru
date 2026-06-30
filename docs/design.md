@@ -402,12 +402,15 @@ Timeouts and reconnect policy are currently hardcoded.
 - server TCP target dial timeout: `10s`
 - server QUIC accept failure retry backoff: starts at `100ms`, doubles on consecutive failures, capped at `30s`, and resets after a successful accept
 - client upstream reconnect backoff after failed dial attempts: `500ms`, `1s`, `2s`, `4s`, `8s`, `16s`, capped at `16s`
+- server relay peer reconnect backoff for `dial: true` peers: `500ms`, `1s`, `2s`, `4s`, `8s`, `16s`, then `16s` forever until reconnect succeeds
 
 Server service target dialing uses `net.Dialer.DialContext` and validates configured service targets with `net.SplitHostPort` before dialing. DNS lookup and dial errors are reported through `ConnectResponse`.
 
 The server listener accept loop is resilient to transient QUIC accept failures. If accepting a connection fails while the server context is still active, qoru logs the failure, waits with exponential backoff, and retries instead of immediately shutting down. The backoff resets after a successful accept.
 
 Client reconnect is on demand. qoru does not run a background reconnect loop and does not sleep inside local TCP handlers during backoff. If a local TCP connection arrives while the selected upstream is still in reconnect backoff, stream setup fails fast and the local TCP connection is closed without payload injection.
+
+Relay peer reconnect for `dial: true` peers runs in the background and also reconnects on demand when a forwarded request needs a peer session. During peer reconnect backoff, forwarded requests fail fast with `NEXT_HOP_UNREACHABLE`.
 
 Timeouts and reconnect policy are not yet configurable.
 
@@ -480,7 +483,7 @@ In this model, route forwarding asks for an authenticated peer session by node I
 
 For now, do not configure both sides of a peer relationship with `dial: true`. Exactly one side should initiate and the other side should list the peer without `dial` or with `dial: false`. Mutual dialing is intentionally unsupported for now to keep session ownership simple.
 
-Current implementation note: explicit-route relay forwarding uses peer sessions keyed by authenticated node ID. A server dials configured `dial: true` peers at startup, reuses the QUIC connection for relayed streams, and reconnects on demand if opening a stream fails. Accepted inbound connections from configured peers are also registered as reusable peer sessions, so either side can open streams on the same QUIC connection. Inbound connections from nodes not listed in `peers` are still accepted for normal client/service use, but are not registered as relay peer sessions. If a duplicate peer session appears, the first live session wins and the duplicate is logged and closed.
+Current implementation note: explicit-route relay forwarding uses peer sessions keyed by authenticated node ID. A server attempts to dial configured `dial: true` peers at startup, but startup continues if a peer is unavailable. Dialing peers are maintained by background reconnect loops with capped exponential backoff: `500ms`, `1s`, `2s`, `4s`, `8s`, `16s`, then `16s` forever until reconnect succeeds. Forwarding also reconnects on demand when backoff allows; during backoff, route requests fail fast with `NEXT_HOP_UNREACHABLE`. Accepted inbound connections from configured peers are also registered as reusable peer sessions, so either side can open streams on the same QUIC connection. Inbound connections from nodes not listed in `peers` are still accepted for normal client/service use, but are not registered as relay peer sessions. If a duplicate peer session appears, the first live session wins and the duplicate is logged and closed.
 
 ## Server Runtime
 

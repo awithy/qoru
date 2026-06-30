@@ -11,6 +11,46 @@ import (
 	"github.com/awithy/qoru/internal/config"
 )
 
+func TestRunStartsWithUnavailableDialPeer(t *testing.T) {
+	cfg := &config.Config{
+		NodeID:   "relay-a",
+		Mode:     config.ModeServer,
+		Identity: config.IdentityConfig{Cert: "../../dev/certs/relay-a.crt", Key: "../../dev/certs/relay-a.key", CA: "../../dev/certs/ca.crt"},
+		Listen:   "127.0.0.1:0",
+		Peers:    []config.PeerConfig{{ID: "relay-b", Address: "127.0.0.1:1", Dial: true}},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	started := make(chan string, 1)
+	errCh := make(chan error, 1)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	go func() {
+		errCh <- Run(ctx, cfg, logger, WithStartedFunc(func(addr string) { started <- addr }))
+	}()
+
+	select {
+	case <-started:
+	case err := <-errCh:
+		t.Fatalf("server exited before starting: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for server to start")
+	}
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for server to stop")
+	}
+}
+
 func TestRunStartsAndStopsQUICServer(t *testing.T) {
 	cfg := &config.Config{
 		NodeID:   "server-1",

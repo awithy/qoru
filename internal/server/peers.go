@@ -14,6 +14,34 @@ import (
 
 const defaultPeerDialTimeout = 10 * time.Second
 
+var peerReconnectBackoffAfterFailure = []time.Duration{
+	500 * time.Millisecond,
+	1 * time.Second,
+	2 * time.Second,
+	4 * time.Second,
+	8 * time.Second,
+	16 * time.Second,
+}
+
+type PeerReconnectBackoffError struct {
+	PeerID      string
+	Address     string
+	NextAttempt time.Time
+	Err         error
+}
+
+func (e *PeerReconnectBackoffError) Error() string {
+	msg := "peer reconnect backoff active until " + e.NextAttempt.Format(time.RFC3339Nano)
+	if e.Err != nil {
+		return msg + ": " + e.Err.Error()
+	}
+	return msg
+}
+
+func (e *PeerReconnectBackoffError) Unwrap() error {
+	return e.Err
+}
+
 type peerSessions struct {
 	nodeID      string
 	identity    config.IdentityConfig
@@ -21,8 +49,12 @@ type peerSessions struct {
 	logger      *slog.Logger
 	onConnected func(*quic.Conn)
 
-	mu    sync.Mutex
-	conns map[string]*quic.Conn
+	mu               sync.Mutex
+	conns            map[string]*quic.Conn
+	nextDial         map[string]time.Time
+	lastDialErr      map[string]error
+	backoffFailCount map[string]int
+	now              func() time.Time
 }
 
 func newPeerSessions(cfg *config.Config, logger *slog.Logger) *peerSessions {
@@ -30,7 +62,17 @@ func newPeerSessions(cfg *config.Config, logger *slog.Logger) *peerSessions {
 	for _, peer := range cfg.Peers {
 		peers[peer.ID] = peer
 	}
-	return &peerSessions{nodeID: cfg.NodeID, identity: cfg.Identity, peers: peers, logger: logger, conns: make(map[string]*quic.Conn)}
+	return &peerSessions{
+		nodeID:           cfg.NodeID,
+		identity:         cfg.Identity,
+		peers:            peers,
+		logger:           logger,
+		conns:            make(map[string]*quic.Conn),
+		nextDial:         make(map[string]time.Time),
+		lastDialErr:      make(map[string]error),
+		backoffFailCount: make(map[string]int),
+		now:              time.Now,
+	}
 }
 
 func (s *peerSessions) ConnectAll(ctx context.Context) error {
@@ -38,9 +80,10 @@ func (s *peerSessions) ConnectAll(ctx context.Context) error {
 		if !peer.Dial {
 			continue
 		}
-		if _, err := s.connection(ctx, peer.ID); err != nil {
-			return fmt.Errorf("connect peer %q: %w", peer.ID, err)
+		if _, err := s.connection(ctx, peer.ID); err != nil && s.logger != nil {
+			s.logger.Warn("peer startup connect failed", "peer_id", peer.ID, "addr", peer.Address, "error", err)
 		}
+		go s.maintainConnection(ctx, peer.ID)
 	}
 	return nil
 }
@@ -60,6 +103,7 @@ func (s *peerSessions) RegisterInbound(peerID string, conn *quic.Conn) bool {
 		return true
 	}
 	s.conns[peerID] = conn
+	s.resetDialBackoff(peerID)
 	s.logger.Info("peer connected", "peer_id", peerID, "direction", "inbound")
 	return true
 }
@@ -102,13 +146,21 @@ func (s *peerSessions) connection(ctx context.Context, peerID string) (*quic.Con
 		delete(s.conns, peerID)
 	}
 	peer, ok := s.peers[peerID]
-	s.mu.Unlock()
 	if !ok {
+		s.mu.Unlock()
 		return nil, fmt.Errorf("peer %q is not configured", peerID)
 	}
 	if peer.Address == "" {
+		s.mu.Unlock()
 		return nil, fmt.Errorf("peer %q has no dial address", peerID)
 	}
+	now := s.now()
+	if next := s.nextDial[peerID]; !next.IsZero() && now.Before(next) {
+		err := &PeerReconnectBackoffError{PeerID: peerID, Address: peer.Address, NextAttempt: next, Err: s.lastDialErr[peerID]}
+		s.mu.Unlock()
+		return nil, err
+	}
+	s.mu.Unlock()
 
 	tlsConfig, err := identity.ClientTLSConfig(s.identity, peerID)
 	if err != nil {
@@ -118,22 +170,94 @@ func (s *peerSessions) connection(ctx context.Context, peerID string) (*quic.Con
 	defer cancel()
 	dialed, err := quic.DialAddr(dialCtx, peer.Address, tlsConfig, &quic.Config{})
 	if err != nil {
+		s.recordDialFailure(peerID, peer, err)
 		return nil, err
 	}
-	s.logger.Info("peer connected", "peer_id", peerID, "addr", peer.Address, "direction", "outbound")
+	if s.logger != nil {
+		s.logger.Info("peer connected", "peer_id", peerID, "addr", peer.Address, "direction", "outbound")
+	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if existing := s.conns[peerID]; existing != nil && existing.Context().Err() == nil {
-		s.logger.Warn("duplicate peer session rejected", "peer_id", peerID, "direction", "outbound")
+		if s.logger != nil {
+			s.logger.Warn("duplicate peer session rejected", "peer_id", peerID, "direction", "outbound")
+		}
 		_ = dialed.CloseWithError(0, "duplicate peer session unsupported")
+		s.mu.Unlock()
 		return existing, nil
 	}
 	s.conns[peerID] = dialed
-	if s.onConnected != nil {
-		s.onConnected(dialed)
+	s.resetDialBackoff(peerID)
+	onConnected := s.onConnected
+	s.mu.Unlock()
+	if onConnected != nil {
+		onConnected(dialed)
 	}
 	return dialed, nil
+}
+
+func (s *peerSessions) maintainConnection(ctx context.Context, peerID string) {
+	for ctx.Err() == nil {
+		conn, err := s.connection(ctx, peerID)
+		if err != nil {
+			if s.logger != nil {
+				attrs := []any{"peer_id", peerID, "error", err}
+				if backoff, ok := err.(*PeerReconnectBackoffError); ok {
+					attrs = append(attrs, "addr", backoff.Address, "next_attempt", backoff.NextAttempt.Format(time.RFC3339Nano))
+				}
+				s.logger.Warn("peer reconnect failed", attrs...)
+			}
+			s.sleepUntilNextDial(ctx, peerID)
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-conn.Context().Done():
+			s.drop(peerID, conn, "peer disconnected")
+		}
+	}
+}
+
+func (s *peerSessions) sleepUntilNextDial(ctx context.Context, peerID string) {
+	s.mu.Lock()
+	next := s.nextDial[peerID]
+	now := s.now()
+	s.mu.Unlock()
+
+	delay := 500 * time.Millisecond
+	if !next.IsZero() && next.After(now) {
+		delay = next.Sub(now)
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+}
+
+func (s *peerSessions) recordDialFailure(peerID string, peer config.PeerConfig, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	delay := peerReconnectBackoffAfterFailure[len(peerReconnectBackoffAfterFailure)-1]
+	if s.backoffFailCount[peerID] < len(peerReconnectBackoffAfterFailure) {
+		delay = peerReconnectBackoffAfterFailure[s.backoffFailCount[peerID]]
+	}
+	s.backoffFailCount[peerID]++
+	s.nextDial[peerID] = now.Add(delay)
+	s.lastDialErr[peerID] = err
+	if s.logger != nil {
+		s.logger.Warn("peer reconnect scheduled", "peer_id", peerID, "addr", peer.Address, "backoff", delay.String(), "next_attempt", s.nextDial[peerID].Format(time.RFC3339Nano), "error", err)
+	}
+}
+
+func (s *peerSessions) resetDialBackoff(peerID string) {
+	delete(s.nextDial, peerID)
+	delete(s.lastDialErr, peerID)
+	delete(s.backoffFailCount, peerID)
 }
 
 func (s *peerSessions) drop(peerID string, conn *quic.Conn, reason string) {

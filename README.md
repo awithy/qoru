@@ -246,7 +246,7 @@ Near-term:
 - Add better reconnect observability and clearer server-side session handling.
 - Improve duplicate peer-session diagnostics and validation where possible.
 - Add richer service selection semantics for future multi-egress/load-balanced service routing.
-- Improve peer/session reconnect behavior and operational observability.
+- Improve peer/session operational observability.
 
 Longer-term:
 
@@ -274,7 +274,7 @@ examples/config/relay-b-threehop.yaml
 examples/config/relay-c.yaml
 ```
 
-Server/relay configs use `peers` for relay neighbors; client configs use `servers` for direct upstream entry points. For now, configure `dial: true` on only one side of a peer relationship. The other side may list the peer without `dial` or with `dial: false` to accept/register inbound sessions. Mutual dialing is unsupported; duplicate peer sessions are logged and closed with the first live session winning.
+Server/relay configs use `peers` for relay neighbors; client configs use `servers` for direct upstream entry points. For now, configure `dial: true` on only one side of a peer relationship. The other side may list the peer without `dial` or with `dial: false` to accept/register inbound sessions. Dialing peers reconnect forever with capped exponential backoff. Mutual dialing is unsupported; duplicate peer sessions are logged and closed with the first live session winning.
 
 ## Status
 
