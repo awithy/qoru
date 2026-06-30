@@ -20,11 +20,25 @@ type MessageType uint8
 const (
 	TypeConnectRequest  MessageType = 1
 	TypeConnectResponse MessageType = 2
+	TypeE2EClientHello  MessageType = 3
+	TypeE2EServerHello  MessageType = 4
+	TypeE2EData         MessageType = 5
+	TypeE2EClose        MessageType = 6
 )
 
 const (
 	ConnectStatusOK    uint8 = 0
 	ConnectStatusError uint8 = 1
+)
+
+const (
+	MaxE2ECertChainCount     = 8
+	MaxE2ECertLength         = 16 * 1024
+	MaxE2EEphemeralKeyLength = 4096
+	MaxE2ESignatureLength    = 8192
+	MaxE2ENonceSuffixLength  = 24
+	MaxE2ECiphertextLength   = MaxPayloadSize - 3
+	MaxE2ECloseMessageLength = MaxPayloadSize - 3
 )
 
 type ConnectCode uint8
@@ -87,6 +101,28 @@ type ConnectRequest struct {
 type ConnectResponse struct {
 	OK      bool
 	Code    ConnectCode
+	Message string
+}
+
+type E2EClientHello struct {
+	ClientCertChain    [][]byte
+	EphemeralPublicKey []byte
+	Signature          []byte
+}
+
+type E2EServerHello struct {
+	ServiceCertChain   [][]byte
+	EphemeralPublicKey []byte
+	Signature          []byte
+}
+
+type E2EData struct {
+	NonceSuffix []byte
+	Ciphertext  []byte
+}
+
+type E2EClose struct {
+	Code    uint8
 	Message string
 }
 
@@ -329,4 +365,250 @@ func ReadConnectResponse(r io.Reader) (ConnectResponse, error) {
 	default:
 		return ConnectResponse{}, fmt.Errorf("unknown connect response status %d", status)
 	}
+}
+
+func WriteE2EClientHello(w io.Writer, hello E2EClientHello) error {
+	payload, err := marshalE2EHello(hello.ClientCertChain, hello.EphemeralPublicKey, hello.Signature, "client")
+	if err != nil {
+		return err
+	}
+	return WriteFrame(w, TypeE2EClientHello, payload)
+}
+
+func ReadE2EClientHello(r io.Reader) (E2EClientHello, error) {
+	chain, key, sig, err := readE2EHelloFrame(r, TypeE2EClientHello, "client")
+	if err != nil {
+		return E2EClientHello{}, err
+	}
+	return E2EClientHello{ClientCertChain: chain, EphemeralPublicKey: key, Signature: sig}, nil
+}
+
+func WriteE2EServerHello(w io.Writer, hello E2EServerHello) error {
+	payload, err := marshalE2EHello(hello.ServiceCertChain, hello.EphemeralPublicKey, hello.Signature, "server")
+	if err != nil {
+		return err
+	}
+	return WriteFrame(w, TypeE2EServerHello, payload)
+}
+
+func ReadE2EServerHello(r io.Reader) (E2EServerHello, error) {
+	chain, key, sig, err := readE2EHelloFrame(r, TypeE2EServerHello, "server")
+	if err != nil {
+		return E2EServerHello{}, err
+	}
+	return E2EServerHello{ServiceCertChain: chain, EphemeralPublicKey: key, Signature: sig}, nil
+}
+
+func marshalE2EHello(certChain [][]byte, ephemeralPublicKey, signature []byte, label string) ([]byte, error) {
+	if len(certChain) == 0 {
+		return nil, fmt.Errorf("%s cert chain is required", label)
+	}
+	if len(certChain) > MaxE2ECertChainCount {
+		return nil, fmt.Errorf("%s cert chain too long: %d > %d", label, len(certChain), MaxE2ECertChainCount)
+	}
+	payloadLen := 1
+	for i, cert := range certChain {
+		if len(cert) == 0 {
+			return nil, fmt.Errorf("%s cert chain[%d] is required", label, i)
+		}
+		if len(cert) > MaxE2ECertLength {
+			return nil, fmt.Errorf("%s cert chain[%d] too long: %d > %d", label, i, len(cert), MaxE2ECertLength)
+		}
+		payloadLen += 2 + len(cert)
+	}
+	if len(ephemeralPublicKey) == 0 {
+		return nil, fmt.Errorf("%s ephemeral public key is required", label)
+	}
+	if len(ephemeralPublicKey) > MaxE2EEphemeralKeyLength {
+		return nil, fmt.Errorf("%s ephemeral public key too long: %d > %d", label, len(ephemeralPublicKey), MaxE2EEphemeralKeyLength)
+	}
+	if len(signature) == 0 {
+		return nil, fmt.Errorf("%s signature is required", label)
+	}
+	if len(signature) > MaxE2ESignatureLength {
+		return nil, fmt.Errorf("%s signature too long: %d > %d", label, len(signature), MaxE2ESignatureLength)
+	}
+	payloadLen += 2 + len(ephemeralPublicKey) + 2 + len(signature)
+	if payloadLen > MaxPayloadSize {
+		return nil, fmt.Errorf("%s hello payload too large: %d > %d", label, payloadLen, MaxPayloadSize)
+	}
+
+	payload := make([]byte, payloadLen)
+	offset := 0
+	payload[offset] = uint8(len(certChain))
+	offset++
+	for _, cert := range certChain {
+		binary.BigEndian.PutUint16(payload[offset:offset+2], uint16(len(cert)))
+		copy(payload[offset+2:], cert)
+		offset += 2 + len(cert)
+	}
+	binary.BigEndian.PutUint16(payload[offset:offset+2], uint16(len(ephemeralPublicKey)))
+	copy(payload[offset+2:], ephemeralPublicKey)
+	offset += 2 + len(ephemeralPublicKey)
+	binary.BigEndian.PutUint16(payload[offset:offset+2], uint16(len(signature)))
+	copy(payload[offset+2:], signature)
+	return payload, nil
+}
+
+func readE2EHelloFrame(r io.Reader, typ MessageType, label string) ([][]byte, []byte, []byte, error) {
+	frame, err := ReadFrame(r)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if frame.Type != typ {
+		return nil, nil, nil, fmt.Errorf("unexpected message type %d", frame.Type)
+	}
+	return unmarshalE2EHello(frame.Payload, label)
+}
+
+func unmarshalE2EHello(payload []byte, label string) ([][]byte, []byte, []byte, error) {
+	if len(payload) < 1 {
+		return nil, nil, nil, fmt.Errorf("malformed %s hello payload", label)
+	}
+	offset := 0
+	chainCount := int(payload[offset])
+	offset++
+	if chainCount == 0 {
+		return nil, nil, nil, fmt.Errorf("%s cert chain is required", label)
+	}
+	if chainCount > MaxE2ECertChainCount {
+		return nil, nil, nil, fmt.Errorf("%s cert chain too long: %d > %d", label, chainCount, MaxE2ECertChainCount)
+	}
+	chain := make([][]byte, 0, chainCount)
+	for i := 0; i < chainCount; i++ {
+		cert, next, err := readLengthPrefixedBytes(payload, offset, MaxE2ECertLength, fmt.Sprintf("%s cert chain[%d]", label, i))
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		chain = append(chain, cert)
+		offset = next
+	}
+	ephemeralPublicKey, next, err := readLengthPrefixedBytes(payload, offset, MaxE2EEphemeralKeyLength, label+" ephemeral public key")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	offset = next
+	signature, next, err := readLengthPrefixedBytes(payload, offset, MaxE2ESignatureLength, label+" signature")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	offset = next
+	if len(payload[offset:]) != 0 {
+		return nil, nil, nil, fmt.Errorf("malformed %s hello payload: trailing bytes", label)
+	}
+	return chain, ephemeralPublicKey, signature, nil
+}
+
+func WriteE2EData(w io.Writer, data E2EData) error {
+	if len(data.NonceSuffix) == 0 {
+		return fmt.Errorf("nonce suffix is required")
+	}
+	if len(data.NonceSuffix) > MaxE2ENonceSuffixLength {
+		return fmt.Errorf("nonce suffix too long: %d > %d", len(data.NonceSuffix), MaxE2ENonceSuffixLength)
+	}
+	if len(data.Ciphertext) == 0 {
+		return fmt.Errorf("ciphertext is required")
+	}
+	if len(data.Ciphertext) > MaxE2ECiphertextLength {
+		return fmt.Errorf("ciphertext too long: %d > %d", len(data.Ciphertext), MaxE2ECiphertextLength)
+	}
+	payload := make([]byte, 1+len(data.NonceSuffix)+2+len(data.Ciphertext))
+	offset := 0
+	payload[offset] = uint8(len(data.NonceSuffix))
+	offset++
+	copy(payload[offset:], data.NonceSuffix)
+	offset += len(data.NonceSuffix)
+	binary.BigEndian.PutUint16(payload[offset:offset+2], uint16(len(data.Ciphertext)))
+	copy(payload[offset+2:], data.Ciphertext)
+	return WriteFrame(w, TypeE2EData, payload)
+}
+
+func ReadE2EData(r io.Reader) (E2EData, error) {
+	frame, err := ReadFrame(r)
+	if err != nil {
+		return E2EData{}, err
+	}
+	if frame.Type != TypeE2EData {
+		return E2EData{}, fmt.Errorf("unexpected message type %d", frame.Type)
+	}
+	if len(frame.Payload) < 4 {
+		return E2EData{}, fmt.Errorf("malformed e2e data payload")
+	}
+	offset := 0
+	nonceLen := int(frame.Payload[offset])
+	if nonceLen == 0 {
+		return E2EData{}, fmt.Errorf("nonce suffix is required")
+	}
+	if nonceLen > MaxE2ENonceSuffixLength {
+		return E2EData{}, fmt.Errorf("nonce suffix too long: %d > %d", nonceLen, MaxE2ENonceSuffixLength)
+	}
+	offset++
+	if len(frame.Payload) < offset+nonceLen+2 {
+		return E2EData{}, fmt.Errorf("malformed e2e data payload: missing ciphertext length")
+	}
+	nonce := append([]byte(nil), frame.Payload[offset:offset+nonceLen]...)
+	offset += nonceLen
+	ciphertextLen := int(binary.BigEndian.Uint16(frame.Payload[offset : offset+2]))
+	if ciphertextLen == 0 {
+		return E2EData{}, fmt.Errorf("ciphertext is required")
+	}
+	if ciphertextLen > MaxE2ECiphertextLength {
+		return E2EData{}, fmt.Errorf("ciphertext too long: %d > %d", ciphertextLen, MaxE2ECiphertextLength)
+	}
+	offset += 2
+	if len(frame.Payload[offset:]) != ciphertextLen {
+		return E2EData{}, fmt.Errorf("malformed e2e data payload: ciphertext length mismatch")
+	}
+	ciphertext := append([]byte(nil), frame.Payload[offset:]...)
+	return E2EData{NonceSuffix: nonce, Ciphertext: ciphertext}, nil
+}
+
+func WriteE2EClose(w io.Writer, close E2EClose) error {
+	if len(close.Message) > MaxE2ECloseMessageLength {
+		return fmt.Errorf("close message too long: %d > %d", len(close.Message), MaxE2ECloseMessageLength)
+	}
+	payload := make([]byte, 3+len(close.Message))
+	payload[0] = close.Code
+	binary.BigEndian.PutUint16(payload[1:3], uint16(len(close.Message)))
+	copy(payload[3:], close.Message)
+	return WriteFrame(w, TypeE2EClose, payload)
+}
+
+func ReadE2EClose(r io.Reader) (E2EClose, error) {
+	frame, err := ReadFrame(r)
+	if err != nil {
+		return E2EClose{}, err
+	}
+	if frame.Type != TypeE2EClose {
+		return E2EClose{}, fmt.Errorf("unexpected message type %d", frame.Type)
+	}
+	if len(frame.Payload) < 3 {
+		return E2EClose{}, fmt.Errorf("malformed e2e close payload")
+	}
+	messageLen := int(binary.BigEndian.Uint16(frame.Payload[1:3]))
+	if messageLen > MaxE2ECloseMessageLength {
+		return E2EClose{}, fmt.Errorf("close message too long: %d > %d", messageLen, MaxE2ECloseMessageLength)
+	}
+	if len(frame.Payload[3:]) != messageLen {
+		return E2EClose{}, fmt.Errorf("malformed e2e close payload: message length mismatch")
+	}
+	return E2EClose{Code: frame.Payload[0], Message: string(frame.Payload[3:])}, nil
+}
+
+func readLengthPrefixedBytes(payload []byte, offset, maxLen int, field string) ([]byte, int, error) {
+	if len(payload) < offset+2 {
+		return nil, offset, fmt.Errorf("malformed e2e hello payload: missing %s length", field)
+	}
+	length := int(binary.BigEndian.Uint16(payload[offset : offset+2]))
+	if length == 0 {
+		return nil, offset, fmt.Errorf("%s is required", field)
+	}
+	if length > maxLen {
+		return nil, offset, fmt.Errorf("%s too long: %d > %d", field, length, maxLen)
+	}
+	if len(payload) < offset+2+length {
+		return nil, offset, fmt.Errorf("malformed e2e hello payload: %s length mismatch", field)
+	}
+	value := append([]byte(nil), payload[offset+2:offset+2+length]...)
+	return value, offset + 2 + length, nil
 }

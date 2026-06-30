@@ -496,6 +496,10 @@ Current constants:
 Version = 1
 TypeConnectRequest = 1
 TypeConnectResponse = 2
+TypeE2EClientHello = 3
+TypeE2EServerHello = 4
+TypeE2EData = 5
+TypeE2EClose = 6
 MaxPayloadSize = 64*1024 - 1
 MaxProtocolLength = 32
 MaxTargetLength = 4096
@@ -553,6 +557,54 @@ Current response codes:
 ```
 
 If status is OK, code must be `OK` and both sides hand the stream over to raw TCP proxying. If status is error, code identifies the failure class and message provides human-readable detail.
+
+### E2E scaffolding frames
+
+The protocol package includes frame encoders/decoders for future E2E handshakes and encrypted payloads. These frames are not used by the runtime yet.
+
+`E2EClientHello` payload:
+
+```text
+cert_chain_count uint8
+repeated cert_chain_count times:
+  cert_len       uint16 big endian
+  cert_der       []byte
+key_len          uint16 big endian
+ephemeral_key    []byte
+signature_len    uint16 big endian
+signature        []byte
+```
+
+`E2EServerHello` uses the same shape, but the certificate chain is the egress service certificate chain.
+
+`E2EData` payload:
+
+```text
+nonce_suffix_len uint8
+nonce_suffix     []byte
+ciphertext_len   uint16 big endian
+ciphertext       []byte
+```
+
+`E2EClose` payload:
+
+```text
+code        uint8
+message_len uint16 big endian
+message     []byte
+```
+
+Current E2E scaffolding limits:
+
+```text
+MaxE2ECertChainCount     = 8
+MaxE2ECertLength         = 16 KiB
+MaxE2EEphemeralKeyLength = 4096
+MaxE2ESignatureLength    = 8192
+MaxE2ENonceSuffixLength  = 24
+```
+
+The exact handshake ordering, key schedule, AEAD, nonce construction, close-code semantics, and integration with `ConnectRequest` negotiation are still open design items.
 
 Current TCP stream model:
 

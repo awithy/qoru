@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -156,5 +157,148 @@ func TestReadConnectResponseRejectsInvalidCode(t *testing.T) {
 	_, err := ReadConnectResponse(&buf)
 	if err == nil {
 		t.Fatal("expected invalid code error")
+	}
+}
+
+func TestE2EClientHelloRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	want := E2EClientHello{ClientCertChain: [][]byte{[]byte("client-cert"), []byte("ca-cert")}, EphemeralPublicKey: []byte("client-key"), Signature: []byte("client-sig")}
+
+	if err := WriteE2EClientHello(&buf, want); err != nil {
+		t.Fatalf("WriteE2EClientHello returned error: %v", err)
+	}
+	got, err := ReadE2EClientHello(&buf)
+	if err != nil {
+		t.Fatalf("ReadE2EClientHello returned error: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected %#v, got %#v", want, got)
+	}
+}
+
+func TestE2EServerHelloRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	want := E2EServerHello{ServiceCertChain: [][]byte{[]byte("service-cert")}, EphemeralPublicKey: []byte("server-key"), Signature: []byte("server-sig")}
+
+	if err := WriteE2EServerHello(&buf, want); err != nil {
+		t.Fatalf("WriteE2EServerHello returned error: %v", err)
+	}
+	got, err := ReadE2EServerHello(&buf)
+	if err != nil {
+		t.Fatalf("ReadE2EServerHello returned error: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected %#v, got %#v", want, got)
+	}
+}
+
+func TestE2EDataRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	want := E2EData{NonceSuffix: []byte("nonce"), Ciphertext: []byte("ciphertext")}
+
+	if err := WriteE2EData(&buf, want); err != nil {
+		t.Fatalf("WriteE2EData returned error: %v", err)
+	}
+	got, err := ReadE2EData(&buf)
+	if err != nil {
+		t.Fatalf("ReadE2EData returned error: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected %#v, got %#v", want, got)
+	}
+}
+
+func TestE2ECloseRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	want := E2EClose{Code: 7, Message: "closed"}
+
+	if err := WriteE2EClose(&buf, want); err != nil {
+		t.Fatalf("WriteE2EClose returned error: %v", err)
+	}
+	got, err := ReadE2EClose(&buf)
+	if err != nil {
+		t.Fatalf("ReadE2EClose returned error: %v", err)
+	}
+	if got != want {
+		t.Fatalf("expected %#v, got %#v", want, got)
+	}
+}
+
+func TestWriteE2EClientHelloRejectsMissingFields(t *testing.T) {
+	valid := E2EClientHello{ClientCertChain: [][]byte{[]byte("cert")}, EphemeralPublicKey: []byte("key"), Signature: []byte("sig")}
+	cases := []struct {
+		name  string
+		hello E2EClientHello
+	}{
+		{name: "cert chain", hello: E2EClientHello{EphemeralPublicKey: valid.EphemeralPublicKey, Signature: valid.Signature}},
+		{name: "ephemeral key", hello: E2EClientHello{ClientCertChain: valid.ClientCertChain, Signature: valid.Signature}},
+		{name: "signature", hello: E2EClientHello{ClientCertChain: valid.ClientCertChain, EphemeralPublicKey: valid.EphemeralPublicKey}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := WriteE2EClientHello(io.Discard, tc.hello); err == nil {
+				t.Fatal("expected missing field to be rejected")
+			}
+		})
+	}
+}
+
+func TestWriteE2EClientHelloRejectsOversizedCertChain(t *testing.T) {
+	chain := make([][]byte, MaxE2ECertChainCount+1)
+	for i := range chain {
+		chain[i] = []byte("cert")
+	}
+	err := WriteE2EClientHello(io.Discard, E2EClientHello{ClientCertChain: chain, EphemeralPublicKey: []byte("key"), Signature: []byte("sig")})
+	if err == nil {
+		t.Fatal("expected oversized cert chain to be rejected")
+	}
+}
+
+func TestWriteE2EDataRejectsMissingFields(t *testing.T) {
+	if err := WriteE2EData(io.Discard, E2EData{Ciphertext: []byte("ciphertext")}); err == nil {
+		t.Fatal("expected missing nonce to be rejected")
+	}
+	if err := WriteE2EData(io.Discard, E2EData{NonceSuffix: []byte("nonce")}); err == nil {
+		t.Fatal("expected missing ciphertext to be rejected")
+	}
+}
+
+func TestReadE2EClientHelloRejectsWrongType(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteFrame(&buf, TypeE2EServerHello, []byte{0}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadE2EClientHello(&buf); err == nil {
+		t.Fatal("expected wrong type to be rejected")
+	}
+}
+
+func TestReadE2EClientHelloRejectsMalformedPayload(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteFrame(&buf, TypeE2EClientHello, []byte{1, 0, 4, 'c'}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadE2EClientHello(&buf); err == nil {
+		t.Fatal("expected malformed hello payload to be rejected")
+	}
+}
+
+func TestReadE2EDataRejectsMalformedPayload(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteFrame(&buf, TypeE2EData, []byte{5, 'n'}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadE2EData(&buf); err == nil {
+		t.Fatal("expected malformed data payload to be rejected")
+	}
+}
+
+func TestReadE2ECloseRejectsMalformedPayload(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteFrame(&buf, TypeE2EClose, []byte{1, 0, 4, 'n'}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadE2EClose(&buf); err == nil {
+		t.Fatal("expected malformed close payload to be rejected")
 	}
 }

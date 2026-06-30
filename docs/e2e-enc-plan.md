@@ -178,6 +178,8 @@ Each cert should have its own private key.
 
 ## Slice 5: Protocol Frame Scaffolding for E2E
 
+Status: implemented in the protocol package. Runtime negotiation/handshake use is not implemented yet.
+
 Make the stream capable of carrying framed post-connect E2E messages.
 
 Potential new frame types:
