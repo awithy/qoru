@@ -29,7 +29,7 @@ TCP client -> qoru client -> relay-a -> relay-b -> TCP target
 - Optional one-hop egress selection.
 - Explicit-route multi-hop TCP forwarding using configured relay peers.
 - Startup dialing, inbound session registration, and connection reuse for configured relay peers.
-- Server-side TCP target dialing and byte proxying.
+- Server-side TCP target dialing and half-close-aware byte proxying.
 - SPIFFE-style URI SAN node identities in mTLS certificates.
 - Development certificate generation.
 - Local echo-server demos and automated one-hop, two-hop, and three-hop smoke tests.
@@ -278,7 +278,6 @@ spiffe://qoru/node/server-1
 
 Near-term:
 
-- Improve active connection shutdown behavior.
 - Improve service dial failure behavior for local TCP clients.
 - Add better reconnect observability and clearer server-side session handling.
 - Improve duplicate peer-session diagnostics and validation where possible.

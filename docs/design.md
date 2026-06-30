@@ -34,7 +34,7 @@ Implemented today:
 - Explicit-route multi-hop TCP forwarding through configured next-hop servers.
 - Server-side TCP target dialing with timeout and basic service target address validation.
 - `ConnectResponse` success/failure handshake before raw TCP proxying begins.
-- Bidirectional byte proxying between local TCP, QUIC streams, and server-side TCP targets.
+- Half-close-aware bidirectional byte proxying between local TCP, QUIC streams, and server-side TCP targets.
 
 Not implemented yet:
 
@@ -451,6 +451,8 @@ Current TCP stream model:
 
 The setup/control phase is framed. Once the server confirms success, the remaining stream bytes are proxied directly between the local TCP connection and target TCP connection.
 
+TCP proxying is half-close-aware. When one copy direction reaches EOF, qoru gracefully closes only the opposite write side and lets the other direction continue so request-then-half-close protocols can still receive responses. Unexpected copy or half-close errors abort both endpoints to unblock the paired copy direction.
+
 Future multi-hop/end-to-end encryption will likely require framed encrypted data messages, but the current one-hop TCP implementation keeps raw bytes after the initial setup handshake.
 
 ## Timeouts and Reconnect Backoff
@@ -521,7 +523,7 @@ Relevant client package files:
 - `client.go` contains runtime orchestration, local TCP listeners, and local connection handling.
 - `session.go` contains upstream session selection and reconnect management.
 - `stream.go` contains QUIC dialing and the `ConnectRequest`/`ConnectResponse` stream setup handshake.
-- `proxy.go` contains byte proxying between local TCP connections and QUIC streams.
+- `proxy.go` contains client-specific proxy wiring between local TCP connections and QUIC streams.
 
 Current limitation: reconnect is on demand and applies only to future local TCP connections. Active proxied TCP connections are bound to streams on the old QUIC connection; if that connection dies, those TCP connections are closed rather than resumed. Failed reconnect dials use exponential backoff capped at `16s`; successful reconnect resets the backoff state.
 
@@ -659,6 +661,7 @@ internal/client/       QUIC client runtime, upstream sessions, stream setup, and
 internal/config/       config structs, path resolution, YAML load/marshal, validation
 internal/identity/     TLS and mTLS identity loading
 internal/protocol/     custom binary frame protocol
+internal/proxyio/      shared half-close-aware bidirectional proxying
 internal/requestid/    UUIDv7 request ID generation and validation
 internal/server/       QUIC server runtime and TCP proxying
 dev/echo-server/       local TCP echo target for demos
@@ -669,11 +672,10 @@ docs/                  design documentation
 
 ## Near-Term Next Steps
 
-1. Improve active connection shutdown and goroutine lifecycle tracking.
-2. Add clearer local TCP behavior when service setup/dialing fails.
-3. Improve reconnect observability and clearer server-side session handling.
-4. Consider configurable log level/log format and timeout settings.
-5. Improve duplicate peer-session diagnostics and validation where possible.
-6. Improve explicit-route multi-hop smoke tests and demo docs.
-7. Add richer service selection semantics for future multi-egress/load-balanced service routing.
-8. Later: end-to-end encrypted payload frames.
+1. Add clearer local TCP behavior when service setup/dialing fails.
+2. Improve reconnect observability and clearer server-side session handling.
+3. Consider configurable log level/log format and timeout settings.
+4. Improve duplicate peer-session diagnostics and validation where possible.
+5. Improve explicit-route multi-hop smoke tests and demo docs.
+6. Add richer service selection semantics for future multi-egress/load-balanced service routing.
+7. Later: end-to-end encrypted payload frames.

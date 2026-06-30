@@ -79,6 +79,108 @@ func TestRunListensAndProxiesLocalTCP(t *testing.T) {
 	cancelAndWaitForServer(t, serverCancel, serverErr)
 }
 
+func TestRunAllowsClientHalfCloseBeforeTargetResponse(t *testing.T) {
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	targetListener := startReadAllTCPServer(t)
+	serverCfg := testServerConfig()
+	serverCfg.Services = []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: targetListener.Addr().String(), Peers: []string{"client-1"}}}
+	addr, serverErr := startTestServerWithConfig(t, serverCtx, logger, serverCfg, nil)
+
+	clientCtx, clientCancel := context.WithCancel(context.Background())
+	defer clientCancel()
+	clientCfg := testClientConfig(addr)
+	clientCfg.Forwards[0].Listen = "127.0.0.1:0"
+
+	clientStarted := make(chan string, 1)
+	clientErr := make(chan error, 1)
+	go func() {
+		clientErr <- Run(clientCtx, clientCfg, logger, WithStartedFunc(func(addr string) { clientStarted <- addr }))
+	}()
+
+	clientAddr := waitForClientAddr(t, clientStarted, clientErr)
+	tcpAddr, err := net.ResolveTCPAddr("tcp", clientAddr)
+	if err != nil {
+		t.Fatalf("resolve client listener: %v", err)
+	}
+	localConn, err := net.DialTCP("tcp", nil, tcpAddr)
+	if err != nil {
+		t.Fatalf("dial client listener: %v", err)
+	}
+	defer localConn.Close()
+
+	if _, err := localConn.Write([]byte("half-close")); err != nil {
+		t.Fatalf("write to local connection: %v", err)
+	}
+	if err := localConn.CloseWrite(); err != nil {
+		t.Fatalf("half-close local connection: %v", err)
+	}
+
+	want := "ack:half-close"
+	buf := make([]byte, len(want))
+	if _, err := io.ReadFull(localConn, buf); err != nil {
+		t.Fatalf("read response after half-close: %v", err)
+	}
+	if string(buf) != want {
+		t.Fatalf("expected %q, got %q", want, string(buf))
+	}
+
+	clientCancel()
+	select {
+	case err := <-clientErr:
+		if err != nil {
+			t.Fatalf("expected clean client shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for client shutdown")
+	}
+	cancelAndWaitForServer(t, serverCancel, serverErr)
+}
+
+func TestRunShutdownClosesActiveLocalConnection(t *testing.T) {
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	targetListener := startDiscardTCPServer(t)
+	serverCfg := testServerConfig()
+	serverCfg.Services = []config.ServiceConfig{{Name: "echo", Protocol: "tcp", Target: targetListener.Addr().String(), Peers: []string{"client-1"}}}
+	addr, serverErr := startTestServerWithConfig(t, serverCtx, logger, serverCfg, nil)
+
+	clientCtx, clientCancel := context.WithCancel(context.Background())
+	clientCfg := testClientConfig(addr)
+	clientCfg.Forwards[0].Listen = "127.0.0.1:0"
+
+	clientStarted := make(chan string, 1)
+	clientErr := make(chan error, 1)
+	go func() {
+		clientErr <- Run(clientCtx, clientCfg, logger, WithStartedFunc(func(addr string) { clientStarted <- addr }))
+	}()
+
+	clientAddr := waitForClientAddr(t, clientStarted, clientErr)
+	localConn, err := net.Dial("tcp", clientAddr)
+	if err != nil {
+		t.Fatalf("dial client listener: %v", err)
+	}
+	defer localConn.Close()
+	if _, err := localConn.Write([]byte("still-open")); err != nil {
+		t.Fatalf("write to local connection: %v", err)
+	}
+
+	clientCancel()
+	select {
+	case err := <-clientErr:
+		if err != nil {
+			t.Fatalf("expected clean client shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for client shutdown with active connection")
+	}
+	cancelAndWaitForServer(t, serverCancel, serverErr)
+}
+
 func TestRunProxiesExplicitMultiHopRoute(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -793,6 +895,48 @@ func startFixedTCPServer(t *testing.T, response string) net.Listener {
 				_, _ = conn.Write([]byte(response))
 			}()
 		}
+	}()
+	return listener
+}
+
+func startReadAllTCPServer(t *testing.T) net.Listener {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		body, err := io.ReadAll(conn)
+		if err != nil {
+			return
+		}
+		_, _ = conn.Write([]byte("ack:" + string(body)))
+	}()
+	return listener
+}
+
+func startDiscardTCPServer(t *testing.T) net.Listener {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = io.Copy(io.Discard, conn)
 	}()
 	return listener
 }
