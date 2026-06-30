@@ -268,7 +268,7 @@ Server required fields:
 Server service fields:
 
 - `services`: named protocol-aware services this server can provide. Each service has `name`, `protocol`, `target`, and optional `peers`. If `peers` is omitted or empty, any authenticated peer may use that service.
-- `peers`: optional configured relay peers this server may use for explicit multi-hop forwarding. Each peer has `id`, optional `address`, and optional `dial`. If `dial: true`, `address` is required. The current relay forwarding implementation requires an address for the selected next hop because it still dials on demand.
+- `peers`: optional configured relay peers. Each peer has `id`, optional `address`, and optional `dial`. Conceptually, `peers` represents allowed overlay neighbors. `dial: true` means this node should initiate/maintain an outbound connection to that peer; `address` is required when `dial: true`. `dial: false` or omitted means the peer relationship may be inbound-only. Current forwarding can use configured outbound peers; inbound-only peer registration is not implemented yet.
 
 ## TLS and Identity
 
@@ -456,6 +456,8 @@ Current limitation: reconnect is on demand and applies only to future local TCP 
 
 The long-term relay model treats node-to-node QUIC connections as logical peer sessions, independent of which side initiated the underlying connection.
 
+Peer config should be understood as an allowed overlay-neighbor relationship, not merely a dial target. In the current implementation, only the side that initiates a relay-to-relay connection needs a `peers` entry with `address` and `dial: true`. In the target model, both sides should usually define each other as peers; `dial` controls whether a node initiates the connection or only accepts/registers an inbound session.
+
 A relay/server should eventually:
 
 1. start its QUIC listener
@@ -469,7 +471,7 @@ In this model, route forwarding asks for an authenticated peer session by node I
 
 If two peers connect to each other at the same time, duplicate sessions must be resolved deterministically. A likely rule is to keep the connection initiated by the lexicographically lower node ID and close the duplicate. The exact duplicate-session policy is still to be implemented.
 
-Current implementation note: explicit-route relay forwarding uses outbound peer sessions for configured `dial: true` peers. A server dials those peers at startup, reuses the QUIC connection for relayed streams, and reconnects on demand if opening a stream fails. Inbound session registration and deterministic duplicate-session handling are not implemented yet.
+Current implementation note: explicit-route relay forwarding uses outbound peer sessions for configured `dial: true` peers. A server dials those peers at startup, reuses the QUIC connection for relayed streams, and reconnects on demand if opening a stream fails. Inbound connections are accepted and authenticated, but they are not yet registered as reusable peer sessions and are not yet required to appear in `peers`.
 
 ## Server Runtime
 
