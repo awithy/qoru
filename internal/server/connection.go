@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/awithy/qoru/internal/config"
+	"github.com/awithy/qoru/internal/e2e"
 	"github.com/awithy/qoru/internal/identity"
 	"github.com/awithy/qoru/internal/protocol"
 	"github.com/quic-go/quic-go"
@@ -205,15 +206,17 @@ func (rt *serverRuntime) handleE2EStream(req protocol.ConnectRequest, stream *qu
 			_ = targetConn.Close()
 		}
 		code := e2eConnectErrorCode(err)
-		logger.Warn("e2e setup failed", "target", svc.Target, "response_code", code.String(), "error", err)
-		writeE2ECloseConnectError(stream, code, err)
+		logger.Warn("e2e setup failed", "target", svc.Target, "response_code", code.String(), "e2e_phase", e2eErrorPhase(err), "error", err)
+		if closeErr := writeE2ECloseConnectError(stream, code, err); closeErr != nil {
+			logger.Debug("write e2e close failed", "response_code", code.String(), "e2e_phase", e2eErrorPhase(err), "error", closeErr)
+		}
 		_ = stream.Close()
 		return
 	}
 	defer targetConn.Close()
 	logger.Info("tcp target connected", "target", svc.Target, "response_code", protocol.ConnectCodeOK.String(), "original_client_id", handshake.clientID)
 	if proxyErr := proxyEncryptedTCP(stream, handshake.reader, handshake.writer, targetConn); proxyErr != nil {
-		logger.Debug("e2e tcp proxy closed with error", "target", svc.Target, "original_client_id", handshake.clientID, "error", proxyErr)
+		logE2EProxyError(logger, "server", proxyErr, "target", svc.Target, "original_client_id", handshake.clientID)
 	}
 	logger.Info("e2e tcp proxy closed", "target", svc.Target, "original_client_id", handshake.clientID)
 }
@@ -281,6 +284,19 @@ func validateConnectRoute(nodeID string, route []string, egress string) error {
 		return fmt.Errorf("egress %q must match final route hop %q", egress, route[len(route)-1])
 	}
 	return nil
+}
+
+func logE2EProxyError(logger *slog.Logger, direction string, err error, attrs ...any) {
+	base := []any{"direction", direction, "error", err}
+	if closeErr, ok := errors.AsType[*e2e.CloseError](err); ok {
+		base = append(base, "response_code", closeErr.ConnectCode.String(), "close_code", closeErr.Code)
+		if closeErr.Message != "" {
+			base = append(base, "close_message", closeErr.Message)
+		}
+		logger.Warn("e2e proxy closed with error", append(base, attrs...)...)
+		return
+	}
+	logger.Debug("e2e proxy closed with error", append(base, attrs...)...)
 }
 
 type e2eConnectError struct {

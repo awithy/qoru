@@ -184,7 +184,7 @@ func handleLocalConnection(ctx context.Context, session upstreamSession, e2eRunt
 					candidateLogger.Info("local tcp proxy closed")
 					return
 				}
-				candidateLogger.Warn("e2e handshake failed", "error", handshakeErr)
+				logE2EHandshakeFailed(candidateLogger, handshakeErr)
 				_ = stream.Close()
 				err = e2eSetupError(handshakeErr)
 			} else {
@@ -204,9 +204,24 @@ func handleLocalConnection(ctx context.Context, session upstreamSession, e2eRunt
 	}
 }
 
+func logE2EHandshakeFailed(logger *slog.Logger, err error) {
+	attrs := []any{"e2e_phase", e2eErrorPhase(err), "error", err}
+	if closeErr, ok := errors.AsType[*e2e.CloseError](err); ok {
+		attrs = append(attrs, "response_code", closeErr.ConnectCode.String(), "close_code", closeErr.Code)
+		if closeErr.Message != "" {
+			attrs = append(attrs, "close_message", closeErr.Message)
+		}
+	}
+	logger.Warn("e2e handshake failed", attrs...)
+}
+
 func logE2EProxyError(logger *slog.Logger, err error) {
 	if closeErr, ok := errors.AsType[*e2e.CloseError](err); ok {
-		logger.Warn("e2e proxy closed with error", "response_code", closeErr.ConnectCode.String(), "close_code", closeErr.Code, "error", err)
+		attrs := []any{"response_code", closeErr.ConnectCode.String(), "close_code", closeErr.Code, "error", err}
+		if closeErr.Message != "" {
+			attrs = append(attrs, "close_message", closeErr.Message)
+		}
+		logger.Warn("e2e proxy closed with error", attrs...)
 		return
 	}
 	logger.Debug("e2e proxy closed with error", "error", err)

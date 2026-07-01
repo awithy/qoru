@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -61,13 +62,41 @@ type e2eServerHandshakeResult struct {
 	clientID string
 }
 
+type e2eHandshakePhaseError struct {
+	phase string
+	err   error
+}
+
+func (e *e2eHandshakePhaseError) Error() string {
+	return e.err.Error()
+}
+
+func (e *e2eHandshakePhaseError) Unwrap() error {
+	return e.err
+}
+
+func e2ePhaseError(phase string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &e2eHandshakePhaseError{phase: phase, err: err}
+}
+
+func e2eErrorPhase(err error) string {
+	var phaseErr *e2eHandshakePhaseError
+	if errors.As(err, &phaseErr) {
+		return phaseErr.phase
+	}
+	return ""
+}
+
 func (rt *e2eServerRuntime) runHandshake(stream *quic.Stream, req protocol.ConnectRequest, svc config.ServiceConfig, logger *slog.Logger, beforeServerHello func(clientID string) error) (e2eServerHandshakeResult, error) {
 	if rt == nil {
 		return e2eServerHandshakeResult{}, fmt.Errorf("e2e runtime is not initialized")
 	}
 	serviceCert, err := rt.serviceCertificate(svc)
 	if err != nil {
-		return e2eServerHandshakeResult{}, err
+		return e2eServerHandshakeResult{}, e2ePhaseError("load_service_certificate", err)
 	}
 	transcriptRoute := req.E2ERoute
 	if transcriptRoute == nil {
@@ -76,57 +105,57 @@ func (rt *e2eServerRuntime) runHandshake(stream *quic.Stream, req protocol.Conne
 	handshakeCtx := e2e.Context{RequestID: req.RequestID, Service: req.Service, Egress: req.Egress, Route: transcriptRoute}
 	clientHello, err := protocol.ReadE2EClientHello(stream)
 	if err != nil {
-		return e2eServerHandshakeResult{}, fmt.Errorf("read e2e client hello: %w", err)
+		return e2eServerHandshakeResult{}, e2ePhaseError("read_client_hello", fmt.Errorf("read e2e client hello: %w", err))
 	}
 	clientID, clientLeaf, err := e2e.VerifyClientHello(handshakeCtx, clientHello, rt.nodeRoots)
 	if err != nil {
-		return e2eServerHandshakeResult{}, err
+		return e2eServerHandshakeResult{}, e2ePhaseError("verify_client_hello", err)
 	}
 	if err := authorizeServicePeer(svc, clientID, req.Protocol, req.Service); err != nil {
-		return e2eServerHandshakeResult{}, err
+		return e2eServerHandshakeResult{}, e2ePhaseError("authorize_client", err)
 	}
 	if beforeServerHello != nil {
 		if err := beforeServerHello(clientID); err != nil {
-			return e2eServerHandshakeResult{}, err
+			return e2eServerHandshakeResult{}, e2ePhaseError("prepare_service", err)
 		}
 	}
 	serverEphemeral, err := e2e.GenerateEphemeralKey(nil)
 	if err != nil {
-		return e2eServerHandshakeResult{}, err
+		return e2eServerHandshakeResult{}, e2ePhaseError("generate_server_ephemeral", err)
 	}
 	serverHello, err := e2e.NewServerHello(handshakeCtx, serviceCert, clientHello.EphemeralPublicKey, serverEphemeral.Public)
 	if err != nil {
-		return e2eServerHandshakeResult{}, err
+		return e2eServerHandshakeResult{}, e2ePhaseError("sign_server_hello", err)
 	}
 	if err := protocol.WriteE2EServerHello(stream, serverHello); err != nil {
-		return e2eServerHandshakeResult{}, fmt.Errorf("write e2e server hello: %w", err)
+		return e2eServerHandshakeResult{}, e2ePhaseError("write_server_hello", fmt.Errorf("write e2e server hello: %w", err))
 	}
 	finished, err := protocol.ReadE2EClientFinished(stream)
 	if err != nil {
-		return e2eServerHandshakeResult{}, fmt.Errorf("read e2e client finished: %w", err)
+		return e2eServerHandshakeResult{}, e2ePhaseError("read_client_finished", fmt.Errorf("read e2e client finished: %w", err))
 	}
 	if err := e2e.VerifyClientFinished(handshakeCtx, finished, clientLeaf, clientHello.EphemeralPublicKey, serverHello.EphemeralPublicKey); err != nil {
-		return e2eServerHandshakeResult{}, err
+		return e2eServerHandshakeResult{}, e2ePhaseError("verify_client_finished", err)
 	}
 	sharedSecret, err := e2e.SharedSecret(serverEphemeral.Private, clientHello.EphemeralPublicKey)
 	if err != nil {
-		return e2eServerHandshakeResult{}, err
+		return e2eServerHandshakeResult{}, e2ePhaseError("derive_shared_secret", err)
 	}
 	transcriptHash, err := e2e.TranscriptHash(handshakeCtx, clientHello.EphemeralPublicKey, serverHello.EphemeralPublicKey)
 	if err != nil {
-		return e2eServerHandshakeResult{}, err
+		return e2eServerHandshakeResult{}, e2ePhaseError("hash_transcript", err)
 	}
 	keys, err := e2e.DeriveTrafficKeys(sharedSecret, transcriptHash)
 	if err != nil {
-		return e2eServerHandshakeResult{}, err
+		return e2eServerHandshakeResult{}, e2ePhaseError("derive_traffic_keys", err)
 	}
 	reader, err := e2e.NewEncryptedReader(stream, keys.ClientToServer, transcriptHash)
 	if err != nil {
-		return e2eServerHandshakeResult{}, err
+		return e2eServerHandshakeResult{}, e2ePhaseError("create_encrypted_reader", err)
 	}
 	writer, err := e2e.NewEncryptedWriter(stream, keys.ServerToClient, transcriptHash)
 	if err != nil {
-		return e2eServerHandshakeResult{}, err
+		return e2eServerHandshakeResult{}, e2ePhaseError("create_encrypted_writer", err)
 	}
 	logger.Info("e2e handshake complete", "original_client_id", clientID)
 	return e2eServerHandshakeResult{reader: reader, writer: writer, clientID: clientID}, nil
@@ -151,13 +180,13 @@ func isServiceE2EConfigured(svc config.ServiceConfig) bool {
 	return svc.E2E.Cert != "" || svc.E2E.Key != ""
 }
 
-func writeE2ECloseError(stream *quic.Stream, err error) {
-	writeE2ECloseConnectError(stream, protocol.ConnectCodeInternalError, err)
+func writeE2ECloseError(stream *quic.Stream, err error) error {
+	return writeE2ECloseConnectError(stream, protocol.ConnectCodeInternalError, err)
 }
 
-func writeE2ECloseConnectError(stream *quic.Stream, code protocol.ConnectCode, err error) {
+func writeE2ECloseConnectError(stream *quic.Stream, code protocol.ConnectCode, err error) error {
 	if err == nil {
-		return
+		return nil
 	}
-	_ = protocol.WriteE2EClose(stream, protocol.E2EClose{Code: e2e.CloseCodeError, ConnectCode: code, Message: err.Error()})
+	return protocol.WriteE2EClose(stream, protocol.E2EClose{Code: e2e.CloseCodeError, ConnectCode: code, Message: err.Error()})
 }

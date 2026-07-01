@@ -685,6 +685,8 @@ Client reconnect observability is split between upstream-session events and loca
 - successful reconnects after previous failures are logged at `Info`
 - service/policy rejections are logged at `Warn` with machine-readable response codes where applicable
 - relay next-hop failures and downstream rejections are logged at `Warn` with response-code fields
+- E2E setup failures are logged at `Warn` with `response_code` when available and `e2e_phase` values such as `read_server_hello`, `authorize_client`, or `prepare_service`
+- E2E encrypted proxy errors are logged with E2E `close_code`, protocol `response_code`, and close message when present
 - reconnect-backoff local connection failures are logged at `Warn` with `server_id`, `addr`, and `next_attempt`
 - other stream setup or transport failures are logged at `Error`
 
