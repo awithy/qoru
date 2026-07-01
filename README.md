@@ -114,10 +114,21 @@ See `docs/local-demo.md` for more details.
 
 ## Build and Test
 
+Run the normal development gate:
+
+```sh
+make check
+```
+
+Or run individual checks:
+
 ```sh
 make test
 make build
+make race
 ```
+
+`make race` runs Go's race detector on the concurrency-heavy runtime/protocol packages.
 
 The binary is written to:
 

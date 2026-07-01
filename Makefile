@@ -1,4 +1,4 @@
-.PHONY: build test demo-all demo-e2e demo-multihop demo-threehop demo-e2e-encrypted demo-e2e-auto-direct gen-dev-certs diagrams
+.PHONY: build test check race demo-all demo-e2e demo-multihop demo-threehop demo-e2e-encrypted demo-e2e-auto-direct gen-dev-certs diagrams
 
 build:
 	@mkdir -p build
@@ -6,6 +6,11 @@ build:
 
 test:
 	go test ./...
+
+check: test build
+
+race:
+	go test -race ./internal/client ./internal/server ./internal/e2e ./internal/protocol
 
 demo-all: demo-e2e demo-multihop demo-threehop demo-e2e-auto-direct demo-e2e-encrypted
 
