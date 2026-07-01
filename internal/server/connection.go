@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"sync"
 	"time"
 
@@ -190,18 +191,22 @@ func (rt *serverRuntime) handleE2EStream(req protocol.ConnectRequest, stream *qu
 		_ = stream.Close()
 		return
 	}
-	handshake, err := rt.e2e.runHandshake(stream, req, svc, logger)
+	var targetConn net.Conn
+	handshake, err := rt.e2e.runHandshake(stream, req, svc, logger, func(clientID string) error {
+		conn, err := dialTCP(rt.ctx, svc.Target)
+		if err != nil {
+			return &e2eConnectError{code: protocol.ConnectCodeTargetDialFailed, err: err}
+		}
+		targetConn = conn
+		return nil
+	})
 	if err != nil {
-		code := serviceErrorCode(err)
-		logger.Warn("e2e handshake failed", "response_code", code.String(), "error", err)
+		if targetConn != nil {
+			_ = targetConn.Close()
+		}
+		code := e2eConnectErrorCode(err)
+		logger.Warn("e2e setup failed", "target", svc.Target, "response_code", code.String(), "error", err)
 		writeE2ECloseConnectError(stream, code, err)
-		_ = stream.Close()
-		return
-	}
-	targetConn, err := dialTCP(rt.ctx, svc.Target)
-	if err != nil {
-		logger.Error("tcp target dial failed", "target", svc.Target, "response_code", protocol.ConnectCodeTargetDialFailed.String(), "error", err)
-		writeE2ECloseConnectError(stream, protocol.ConnectCodeTargetDialFailed, err)
 		_ = stream.Close()
 		return
 	}
@@ -276,6 +281,30 @@ func validateConnectRoute(nodeID string, route []string, egress string) error {
 		return fmt.Errorf("egress %q must match final route hop %q", egress, route[len(route)-1])
 	}
 	return nil
+}
+
+type e2eConnectError struct {
+	code protocol.ConnectCode
+	err  error
+}
+
+func (e *e2eConnectError) Error() string {
+	if e.err == nil {
+		return e.code.String()
+	}
+	return e.err.Error()
+}
+
+func (e *e2eConnectError) Unwrap() error {
+	return e.err
+}
+
+func e2eConnectErrorCode(err error) protocol.ConnectCode {
+	var e2eErr *e2eConnectError
+	if errors.As(err, &e2eErr) {
+		return e2eErr.code
+	}
+	return serviceErrorCode(err)
 }
 
 func serviceErrorCode(err error) protocol.ConnectCode {

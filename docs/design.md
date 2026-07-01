@@ -473,7 +473,7 @@ A future encrypted stream shape may be:
 ...
 ```
 
-Runtime required-E2E stream shape is `ConnectRequest{E2ERequired}`, `ConnectResponse OK`, `E2EClientHello`, `E2EServerHello`, `E2EClientFinished`, then encrypted `E2EData` records and `E2EClose`. In encrypted mode, final service authorization and target dialing happen only after the egress authenticates the original ingress client.
+Runtime required-E2E stream shape is `ConnectRequest{E2ERequired}`, `ConnectResponse OK`, `E2EClientHello`, `E2EServerHello`, `E2EClientFinished`, then encrypted `E2EData` records and `E2EClose`. If E2E setup fails after `ConnectResponse OK` but before `E2EServerHello`—for example original-client authorization or target dialing fails—the egress sends `E2EClose` with a protocol `ConnectCode`, allowing the ingress to classify the failure and try another setup-time route candidate when policy allows. In encrypted mode, final service authorization and target dialing happen only after the egress authenticates the original ingress client.
 
 ## ALPN
 

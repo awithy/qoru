@@ -61,7 +61,7 @@ type e2eServerHandshakeResult struct {
 	clientID string
 }
 
-func (rt *e2eServerRuntime) runHandshake(stream *quic.Stream, req protocol.ConnectRequest, svc config.ServiceConfig, logger *slog.Logger) (e2eServerHandshakeResult, error) {
+func (rt *e2eServerRuntime) runHandshake(stream *quic.Stream, req protocol.ConnectRequest, svc config.ServiceConfig, logger *slog.Logger, beforeServerHello func(clientID string) error) (e2eServerHandshakeResult, error) {
 	if rt == nil {
 		return e2eServerHandshakeResult{}, fmt.Errorf("e2e runtime is not initialized")
 	}
@@ -84,6 +84,11 @@ func (rt *e2eServerRuntime) runHandshake(stream *quic.Stream, req protocol.Conne
 	}
 	if err := authorizeServicePeer(svc, clientID, req.Protocol, req.Service); err != nil {
 		return e2eServerHandshakeResult{}, err
+	}
+	if beforeServerHello != nil {
+		if err := beforeServerHello(clientID); err != nil {
+			return e2eServerHandshakeResult{}, err
+		}
 	}
 	serverEphemeral, err := e2e.GenerateEphemeralKey(nil)
 	if err != nil {

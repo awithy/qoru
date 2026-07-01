@@ -180,6 +180,112 @@ func TestOpenTCPStreamRejectsRoutedPlaintextForE2EService(t *testing.T) {
 	cancelAndWaitForServer(t, cancel, serverErr)
 }
 
+func TestRunFallsBackToNextE2EStaticServiceRouteCandidate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	targetC := startFixedTCPServer(t, "cccc")
+	requestedAtRelay := make(chan protocol.ConnectRequest, 2)
+	requestedAtB := make(chan protocol.ConnectRequest, 1)
+	requestedAtC := make(chan protocol.ConnectRequest, 1)
+
+	egressBCfg := &config.Config{
+		NodeID:          "relay-b",
+		Mode:            config.ModeServer,
+		Identity:        makeDevNodeCert(t, "relay-b"),
+		ServiceIdentity: config.ServiceIdentityConfig{CA: testcert.ServiceCAPath(t)},
+		Listen:          "127.0.0.1:0",
+		Peers:           []config.PeerConfig{{ID: "relay-a"}},
+		Services: []config.ServiceConfig{{
+			Name:     "echo",
+			Protocol: "tcp",
+			Target:   closedTCPAddr(t),
+			Peers:    []string{"client-1"},
+			E2E:      testcert.ServiceE2E(t, "relay-b-echo", "echo"),
+		}},
+	}
+	egressBAddr, egressBErr := startTestServerWithConfig(t, ctx, logger, egressBCfg, func(req protocol.ConnectRequest) { requestedAtB <- req })
+
+	egressCCfg := &config.Config{
+		NodeID:          "relay-c",
+		Mode:            config.ModeServer,
+		Identity:        makeDevNodeCert(t, "relay-c"),
+		ServiceIdentity: config.ServiceIdentityConfig{CA: testcert.ServiceCAPath(t)},
+		Listen:          "127.0.0.1:0",
+		Peers:           []config.PeerConfig{{ID: "relay-a"}},
+		Services: []config.ServiceConfig{{
+			Name:     "echo",
+			Protocol: "tcp",
+			Target:   targetC.Addr().String(),
+			Peers:    []string{"client-1"},
+			E2E:      testcert.ServiceE2E(t, "relay-c-echo", "echo"),
+		}},
+	}
+	egressCAddr, egressCErr := startTestServerWithConfig(t, ctx, logger, egressCCfg, func(req protocol.ConnectRequest) { requestedAtC <- req })
+
+	relayCfg := &config.Config{
+		NodeID:   "relay-a",
+		Mode:     config.ModeServer,
+		Identity: makeDevNodeCert(t, "relay-a"),
+		Listen:   "127.0.0.1:0",
+		Peers: []config.PeerConfig{
+			{ID: "relay-b", Address: egressBAddr, Dial: true},
+			{ID: "relay-c", Address: egressCAddr, Dial: true},
+		},
+		AllowedRelayClients: []string{"client-1"},
+	}
+	relayAddr, relayErr := startTestServerWithConfig(t, ctx, logger, relayCfg, func(req protocol.ConnectRequest) { requestedAtRelay <- req })
+
+	clientCtx, clientCancel := context.WithCancel(context.Background())
+	defer clientCancel()
+	clientCfg := testClientConfig(relayAddr)
+	clientCfg.ServiceIdentity = config.ServiceIdentityConfig{CA: testcert.ServiceCAPath(t)}
+	clientCfg.Servers = []config.ServerConfig{{ID: "relay-a", Address: relayAddr}}
+	clientCfg.Routes = []config.ServiceRouteConfig{{
+		Service:  "echo",
+		Protocol: "tcp",
+		Candidates: []config.RouteCandidateConfig{
+			{Egress: "relay-b", Route: []string{"relay-a", "relay-b"}},
+			{Egress: "relay-c", Route: []string{"relay-a", "relay-c"}},
+		},
+	}}
+	clientCfg.Forwards = []config.ForwardConfig{{Protocol: "tcp", Listen: "127.0.0.1:0", Service: "echo", E2E: config.ForwardE2EAuto}}
+
+	started := make(chan string, 1)
+	clientErr := make(chan error, 1)
+	go func() {
+		clientErr <- Run(clientCtx, clientCfg, logger, WithStartedFunc(func(addr string) { started <- addr }))
+	}()
+	clientAddr := waitForClientAddr(t, started, clientErr)
+	assertRead(t, clientAddr, "cccc")
+
+	firstRelayReq := waitForConnectRequest(t, requestedAtRelay)
+	secondRelayReq := waitForConnectRequest(t, requestedAtRelay)
+	if strings.Join(firstRelayReq.Route, ",") != "relay-a,relay-b" {
+		t.Fatalf("expected first candidate relay-b, got %#v", firstRelayReq.Route)
+	}
+	if strings.Join(secondRelayReq.Route, ",") != "relay-a,relay-c" {
+		t.Fatalf("expected second candidate relay-c, got %#v", secondRelayReq.Route)
+	}
+	if !waitForConnectRequest(t, requestedAtB).E2ERequired || !waitForConnectRequest(t, requestedAtC).E2ERequired {
+		t.Fatal("expected both egress requests to require e2e")
+	}
+
+	clientCancel()
+	select {
+	case err := <-clientErr:
+		if err != nil {
+			t.Fatalf("expected clean client shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for client shutdown")
+	}
+	cancelAndWaitForServer(t, cancel, relayErr)
+	cancelAndWaitForServer(t, func() {}, egressBErr)
+	cancelAndWaitForServer(t, func() {}, egressCErr)
+}
+
 func TestRunProxiesE2EEncryptedMultiHopRoute(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
