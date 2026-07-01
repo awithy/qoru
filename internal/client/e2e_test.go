@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -178,6 +179,98 @@ func TestOpenTCPStreamRejectsRoutedPlaintextForE2EService(t *testing.T) {
 	}
 
 	cancelAndWaitForServer(t, cancel, serverErr)
+}
+
+func TestRunDoesNotFallBackAfterE2EAccessDenied(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	targetB := startFixedTCPServer(t, "bbbb")
+	requestedAtA := make(chan protocol.ConnectRequest, 1)
+	requestedAtB := make(chan protocol.ConnectRequest, 1)
+
+	serverCfgA := testServerConfig()
+	serverCfgA.NodeID = "server-1"
+	serverCfgA.ServiceIdentity = config.ServiceIdentityConfig{CA: testcert.ServiceCAPath(t)}
+	serverCfgA.Peers = []config.PeerConfig{{ID: "client-1"}}
+	serverCfgA.Services = []config.ServiceConfig{{
+		Name:     "echo",
+		Protocol: "tcp",
+		Target:   closedTCPAddr(t),
+		Peers:    []string{"client-2"},
+		E2E:      testcert.ServiceE2E(t, "server-1-echo", "echo"),
+	}}
+	addrA, serverErrA := startTestServerWithConfig(t, ctx, logger, serverCfgA, func(req protocol.ConnectRequest) { requestedAtA <- req })
+
+	serverCfgB := testServerConfig()
+	serverCfgB.NodeID = "server-2"
+	serverCfgB.Identity = makeDevNodeCert(t, "server-2")
+	serverCfgB.ServiceIdentity = config.ServiceIdentityConfig{CA: testcert.ServiceCAPath(t)}
+	serverCfgB.Peers = []config.PeerConfig{{ID: "client-1"}}
+	serverCfgB.Services = []config.ServiceConfig{{
+		Name:     "echo",
+		Protocol: "tcp",
+		Target:   targetB.Addr().String(),
+		Peers:    []string{"client-1"},
+		E2E:      testcert.ServiceE2E(t, "server-2-echo", "echo"),
+	}}
+	addrB, serverErrB := startTestServerWithConfig(t, ctx, logger, serverCfgB, func(req protocol.ConnectRequest) { requestedAtB <- req })
+
+	clientCtx, clientCancel := context.WithCancel(context.Background())
+	defer clientCancel()
+	clientCfg := testClientConfig(addrA)
+	clientCfg.ServiceIdentity = config.ServiceIdentityConfig{CA: testcert.ServiceCAPath(t)}
+	clientCfg.Servers = []config.ServerConfig{{ID: "server-1", Address: addrA}, {ID: "server-2", Address: addrB}}
+	clientCfg.Routes = []config.ServiceRouteConfig{{
+		Service:  "echo",
+		Protocol: "tcp",
+		Candidates: []config.RouteCandidateConfig{
+			{Egress: "server-1", Route: []string{"server-1"}},
+			{Egress: "server-2", Route: []string{"server-2"}},
+		},
+	}}
+	clientCfg.Forwards = []config.ForwardConfig{{Protocol: "tcp", Listen: "127.0.0.1:0", Service: "echo", E2E: config.ForwardE2EAlways}}
+
+	started := make(chan string, 1)
+	clientErr := make(chan error, 1)
+	go func() {
+		clientErr <- Run(clientCtx, clientCfg, logger, WithStartedFunc(func(addr string) { started <- addr }))
+	}()
+	clientAddr := waitForClientAddr(t, started, clientErr)
+
+	conn, err := net.Dial("tcp", clientAddr)
+	if err != nil {
+		t.Fatalf("dial client listener: %v", err)
+	}
+	_, _ = conn.Write([]byte("should-not-proxy"))
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 1)
+	if n, err := conn.Read(buf); err == nil || n != 0 {
+		t.Fatalf("expected local connection to close without fallback response, n=%d err=%v", n, err)
+	}
+	_ = conn.Close()
+
+	if req := waitForConnectRequest(t, requestedAtA); !req.E2ERequired {
+		t.Fatal("expected first candidate to require e2e")
+	}
+	select {
+	case req := <-requestedAtB:
+		t.Fatalf("did not expect fallback after access denied, got request %#v", req)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	clientCancel()
+	select {
+	case err := <-clientErr:
+		if err != nil {
+			t.Fatalf("expected clean client shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for client shutdown")
+	}
+	cancelAndWaitForServer(t, cancel, serverErrA)
+	cancelAndWaitForServer(t, func() {}, serverErrB)
 }
 
 func TestRunFallsBackToNextE2EStaticServiceRouteCandidate(t *testing.T) {
