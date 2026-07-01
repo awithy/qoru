@@ -2,13 +2,14 @@
 
 ## Overview
 
-`qoru` is an experimental QUIC-based network relay/proxy. The current implementation supports a basic authenticated one-hop TCP proxy:
+`qoru` is an experimental QUIC-based network relay/proxy. The current implementation supports authenticated TCP forwarding over QUIC/mTLS, including direct one-hop forwarding and explicit-route multi-hop forwarding:
 
 ```text
 TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
+TCP client -> qoru client -> relay-a -> relay-b -> TCP target
 ```
 
-The long-term direction is a chainable relay overlay with optional multi-hop forwarding and end-to-end payload encryption. The current code is intentionally smaller: static config, one or more configured direct upstream servers, TCP forwarding, QUIC transport, and mTLS authentication.
+The long-term direction is a chainable relay overlay with service-first routing and end-to-end payload encryption. The current code uses static config, one or more configured direct upstream servers, TCP forwarding, QUIC transport, mTLS authentication, explicit relay routing, static service route candidates, and optional required E2E payload encryption for configured services.
 
 ## Current Capabilities
 
@@ -36,10 +37,10 @@ Implemented today:
 - Server-side TCP target dialing with timeout and basic service target address validation.
 - `ConnectResponse` success/failure handshake before raw TCP proxying begins.
 - Half-close-aware bidirectional byte proxying between local TCP, QUIC streams, and server-side TCP targets.
-- Service identity config, service certificate verification helpers, and development service certificate generation.
-- Protocol frame scaffolding for E2E hello, encrypted data, and close frames.
+- Service identity config, service certificate verification helpers, startup service-certificate validation/cache, and development service certificate generation.
+- Protocol frames for E2E hello, encrypted data, and close messages.
 - Runtime required E2E mode for TCP forwards and services using service identity certificates.
-- Authenticated E2E handshake with client node proof, egress service proof, and encrypted payload records.
+- Authenticated E2E handshake with client node proof, egress service proof, encrypted payload records, and classified E2E setup errors.
 
 Not implemented yet:
 
@@ -88,11 +89,12 @@ For each local TCP connection:
 5. send `ConnectRequest{RequestID: "...", Protocol: "tcp", Service: "...", Egress: "...", Route: [...]}`
 6. read `ConnectResponse`
 7. if setup fails with a retryable setup error before proxying begins, try the next candidate
-8. if OK, proxy bytes between the local TCP connection and QUIC stream
+8. if E2E is required, run the service-identity handshake and switch to encrypted E2E frames
+9. proxy bytes between the local TCP connection and the selected stream mode
 
 ### `qoru server`
 
-Loads and validates server config, loads its TLS identity, starts a QUIC listener, accepts QUIC connections, accepts multiple streams per connection, reads `ConnectRequest`, resolves the requested service, dials the service target, sends `ConnectResponse`, and proxies bytes between the QUIC stream and target TCP connection.
+Loads and validates server config, loads its TLS identity, validates configured E2E service certificates, starts a QUIC listener, accepts QUIC connections, accepts multiple streams per connection, reads `ConnectRequest`, resolves and authorizes the requested service, and proxies bytes. Plaintext service streams dial the target before `ConnectResponse OK`; E2E streams send `ConnectResponse OK`, authenticate the original client, dial the target before `E2EServerHello`, and then exchange encrypted E2E frames.
 
 ### `qoru print-config`
 
@@ -127,9 +129,9 @@ This model supports both automatic routing and client-specified routing without 
 
 ### Static service route candidates
 
-The next routing step should be a minimal static service-first routing layer, not full dynamic topology discovery. The client should be able to map a requested service to one or more candidate egress paths and select one candidate per local TCP connection before opening the QUIC stream.
+qoru includes a minimal static service-first routing layer, not full dynamic topology discovery. The client can map a requested service to one or more candidate egress paths and select one candidate per local TCP connection before opening the QUIC stream.
 
-Example future shape:
+Example shape:
 
 ```yaml
 routes:
@@ -158,7 +160,7 @@ egress  = relay-b
 route   = [relay-a, relay-b]
 ```
 
-Initial candidate selection can be simple and local to the client, such as ordered failover, round-robin, or random selection. There is no per-byte overhead and no relay behavior change required as long as the client resolves the concrete `egress` and `route` before sending `ConnectRequest`.
+Current candidate selection supports ordered setup-time failover. Future policies may add round-robin or random selection. There is no per-byte overhead and no relay behavior change required as long as the client resolves the concrete `egress` and `route` before sending `ConnectRequest`.
 
 Once a connection has started proxying, qoru should not attempt mid-connection failover. If setup fails before proxying begins, the client may try another candidate depending on selection policy and failure class.
 
@@ -434,7 +436,7 @@ The design should skip a shared service private-key model. Sharing one service p
 
 ### E2E handshake target
 
-For each proxied connection, after route selection but before application payload proxying, ingress and egress should perform an authenticated ephemeral key exchange through the selected route:
+For each E2E-required proxied connection, after route selection but before application payload proxying, ingress and egress perform an authenticated ephemeral key exchange through the selected route:
 
 ```text
 client -> egress, via relays: ConnectRequest(service, egress, route, ...)
@@ -446,26 +448,26 @@ client and egress derive per-connection traffic keys
 encrypted framed payload begins
 ```
 
-Both sides should bind signatures and key derivation to the handshake transcript, including at least `request_id`, `service`, selected `egress`, selected `route`, client ephemeral key, and egress ephemeral key. This prevents relays or confused endpoints from replaying a hello into a different request context.
+Both sides bind signatures and key derivation to the handshake transcript, including `request_id`, `service`, selected `egress`, selected original `e2e_route`, client ephemeral key, and egress ephemeral key. This prevents relays or confused endpoints from replaying a hello into a different request context.
 
-The egress should authenticate the original ingress client at the E2E layer, not only the previous-hop relay observed through mTLS. This preserves separate policy layers:
+The egress authenticates the original ingress client at the E2E layer, not only the previous-hop relay observed through mTLS. This preserves separate policy layers:
 
 ```text
 Relay authorization:       can this previous hop forward through this node?
 Service authorization:     can this original client use this service?
 ```
 
-Current `services[].peers` authorization is based on the authenticated direct peer. With E2E service authentication, final service authorization should be able to evaluate the original client identity from `ClientHello`.
+For plaintext service access, `services[].peers` authorization is based on the authenticated direct peer. For E2E service access, final service authorization evaluates the original client identity from `ClientHello`.
 
 ### E2E encrypted data framing
 
-The current stream model switches to raw TCP bytes after `ConnectResponse`. End-to-end payload encryption requires replacing raw bytes with framed encrypted records after the E2E handshake. Intermediary relays should continue to forward opaque stream bytes after setup and should not need access to plaintext TCP payloads.
+The plaintext stream model switches to raw TCP bytes after `ConnectResponse`. End-to-end payload encryption replaces raw bytes with framed encrypted records after the E2E handshake. Intermediary relays continue to forward opaque stream bytes after setup and do not need access to plaintext TCP payloads.
 
-A future encrypted stream shape may be:
+The encrypted stream shape is:
 
 ```text
 [ConnectRequest frame]
-[ConnectResponse or E2E-ready frame]
+[ConnectResponse OK]
 [E2E ClientHello frame]
 [E2E ServerHello frame]
 [encrypted data frame]
@@ -572,9 +574,9 @@ Current response codes:
 
 If status is OK, code must be `OK`. For plaintext requests, both sides hand the stream over to raw TCP proxying. For E2E-required requests, both sides run the E2E handshake and then exchange only encrypted E2E frames. If status is error, code identifies the failure class and message provides human-readable detail.
 
-### E2E scaffolding frames
+### E2E frames
 
-The protocol package includes frame encoders/decoders for E2E handshakes and encrypted payloads. Required E2E runtime mode uses these frames after a successful `ConnectResponse`.
+The protocol package includes frame encoders/decoders for E2E handshakes, encrypted payloads, and encrypted-mode close/error signaling. Required E2E runtime mode uses these frames after a successful `ConnectResponse`.
 
 `E2EClientHello` payload:
 
@@ -618,7 +620,7 @@ message_len  uint16 big endian
 message      []byte
 ```
 
-Current E2E scaffolding limits:
+Current E2E frame limits:
 
 ```text
 MaxE2ECertChainCount     = 8
@@ -655,7 +657,7 @@ Timeouts and reconnect policy are currently hardcoded.
 - client upstream reconnect backoff after failed dial attempts: `500ms`, `1s`, `2s`, `4s`, `8s`, `16s`, capped at `16s`
 - server relay peer reconnect backoff for `dial: true` peers: `500ms`, `1s`, `2s`, `4s`, `8s`, `16s`, then `16s` forever until reconnect succeeds
 
-Server service target dialing uses `net.Dialer.DialContext` and validates configured service targets with `net.SplitHostPort` before dialing. DNS lookup and dial errors are reported through `ConnectResponse`.
+Server service target dialing uses `net.Dialer.DialContext` and validates configured service targets with `net.SplitHostPort` before dialing. DNS lookup and dial errors are reported through `ConnectResponse` for plaintext setup and through `E2EClose` with `TARGET_DIAL_FAILED` for required-E2E setup after `ConnectResponse OK`.
 
 The server listener accept loop is resilient to transient QUIC accept failures. If accepting a connection fails while the server context is still active, qoru logs the failure, waits with exponential backoff, and retries instead of immediately shutting down. The backoff resets after a successful accept.
 
@@ -702,13 +704,15 @@ The current client runtime lives in `internal/client`.
 2. establishes one QUIC/mTLS connection to each configured upstream server
 3. binds one local TCP listener per configured `forwards` entry
 4. starts accept loops for all listeners
-5. for each local TCP connection, selects an upstream session by forward `egress` and opens a new QUIC stream
-6. sends `ConnectRequest{RequestID: "...", Protocol: "tcp", Service: "...", Egress: "...", Route: [...]}`
+5. for each local TCP connection, resolves ordered route candidates and opens a new QUIC stream to the candidate's first hop
+6. sends `ConnectRequest{RequestID: "...", Protocol: "tcp", Service: "...", Egress: "...", Route: [...], E2ERequired: ...}`
 7. waits for `ConnectResponse`
-8. proxies bytes between the local TCP connection and QUIC stream
-9. exits cleanly when the context is canceled
-10. keeps local listeners running if the upstream QUIC connection later fails
-11. reconnects the selected upstream on demand when a later local TCP connection needs a new stream
+8. for E2E-required candidates, runs the service-identity handshake and wraps the stream in encrypted E2E readers/writers
+9. proxies bytes between the local TCP connection and the selected stream mode
+10. if setup fails before proxying with a retryable error, tries the next candidate
+11. exits cleanly when the context is canceled
+12. keeps local listeners running if the upstream QUIC connection later fails
+13. reconnects the selected upstream on demand when a later local TCP connection needs a new stream
 
 Relevant client package files:
 
@@ -748,17 +752,17 @@ The current server runtime lives in `internal/server`.
 
 1. validates server config
 2. loads server mTLS config
-3. starts a QUIC listener on `cfg.Listen`
-4. logs the bound address
-5. accepts QUIC connections
-6. accepts multiple streams per QUIC connection
-7. reads `ConnectRequest` per stream
-8. validates that the requested protocol is currently supported (`tcp`)
-9. validates optional `egress` against this server's `node_id`
-10. resolves and authorizes the requested service for the authenticated peer
-11. dials the configured TCP service target with timeout
-12. sends `ConnectResponse`
-13. if OK, proxies bytes between the QUIC stream and TCP target
+3. validates and caches configured E2E service certificates
+4. starts a QUIC listener on `cfg.Listen`
+5. logs the bound address
+6. accepts QUIC connections
+7. accepts multiple streams per QUIC connection
+8. reads `ConnectRequest` per stream
+9. validates that the requested protocol is currently supported (`tcp`)
+10. validates optional `egress` against this server's `node_id`
+11. handles relay forwarding, plaintext service setup, or required-E2E service setup
+12. for plaintext service setup, resolves/authorizes by authenticated peer, dials the target, sends `ConnectResponse`, and proxies raw bytes
+13. for E2E service setup, sends `ConnectResponse OK`, authenticates/authorizes the original client, dials the target before `E2EServerHello`, and proxies encrypted E2E records
 14. exits cleanly when the context is canceled
 
 For routed requests, the receiving server validates that the first remaining route hop is its own `node_id`. If additional hops remain, the previous hop must be authorized by `allowed_relay_clients`; the relay then opens a stream to the next configured peer, forwards the request with its own hop removed from `route`, relays the downstream `ConnectResponse` back upstream, and then proxies raw bytes between QUIC streams. If no additional hops remain, the server is the routed egress; the previous-hop relay must be listed in top-level `peers` before service resolution and `services[].peers` authorization are evaluated.
@@ -871,6 +875,7 @@ internal/protocol/     custom binary frame protocol
 internal/proxyio/      shared half-close-aware bidirectional proxying
 internal/requestid/    UUIDv7 request ID generation and validation
 internal/server/       QUIC server runtime and TCP proxying
+internal/testcert/     generated test certificate helpers for Go tests
 dev/echo-server/       local TCP echo target for demos
 dev/                   local development helpers
 examples/config/       example client/server YAML configs
@@ -879,7 +884,7 @@ docs/                  design documentation
 
 ## Near-Term Next Steps
 
-Current priority is to advance service-first routing and end-to-end payload encryption while deferring broader operability, topology/control-plane, and UDP work.
+Current priority is operational polish around service-first routing and end-to-end payload encryption while deferring broader topology/control-plane and UDP work.
 
 Completed in the current service/E2E track:
 
@@ -887,14 +892,17 @@ Completed in the current service/E2E track:
 2. Client route resolution from forwards to static candidates.
 3. Ordered setup-time candidate fallback.
 4. Service identity certificates using SPIFFE-style service URI SANs such as `spiffe://qoru/service/echo`.
-5. Protocol frame scaffolding for E2E hello, encrypted data, and close frames.
+5. Protocol frames for E2E hello, encrypted data, and close/error signaling.
 6. Runtime required-E2E negotiation via forward `e2e` policy / `ConnectRequest.E2ERequired`.
 7. Authenticated E2E handshake where the egress proves service identity and the ingress proves original client identity.
 8. Encrypted framed payload records between ingress and egress.
 9. E2E policy enforcement: services with `services[].e2e` reject routed plaintext requests.
+10. E2E setup error classification, ordered candidate fallback for retryable E2E setup failures, and non-retryable access-denied handling.
+11. Startup validation/cache for configured service identity certificates.
+12. E2E observability with handshake phase, close code, and response-code logging.
 
 Next:
 
-1. Add broader E2E examples and operational documentation.
-2. Improve encrypted stream observability and metrics.
-3. Later: dynamic service advertisement/topology, richer health-aware route selection, non-ordered candidate selection policies, and UDP support.
+1. Add broader operational documentation and deployment guidance.
+2. Add metrics/status surfaces for routes, sessions, reconnects, and E2E streams.
+3. Later: dynamic service advertisement/topology, richer health-aware route selection, non-ordered candidate selection policies, configurable timeouts/backoff, and UDP support.

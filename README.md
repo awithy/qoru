@@ -37,6 +37,7 @@ QUIC/mTLS authenticates and encrypts each adjacent hop. When E2E mode is enabled
 - QUIC transport using `quic-go`.
 - mTLS peer authentication with a configured private CA.
 - Custom binary control protocol with UUIDv7 request IDs and machine-readable connect response codes.
+- Static service route candidates with ordered setup-time fallback.
 - One reconnecting upstream QUIC connection per configured client-side server.
 - Multiple direct upstream servers selected by forward `egress`.
 - On-demand upstream reconnect for new local TCP connections after a QUIC connection loss.
@@ -50,6 +51,7 @@ QUIC/mTLS authenticates and encrypts each adjacent hop. When E2E mode is enabled
 - Startup dialing, inbound session registration, and connection reuse for configured relay peers.
 - Server-side TCP target dialing and half-close-aware byte proxying.
 - Optional required end-to-end encrypted TCP payload mode using service identity certificates.
+- Startup service-certificate validation/cache and classified E2E setup/close errors.
 - SPIFFE-style URI SAN node identities in mTLS certificates.
 - Development certificate generation.
 - Local echo-server demos and automated one-hop, two-hop, three-hop, and encrypted E2E smoke tests.
@@ -358,7 +360,8 @@ Near-term:
 
 Longer-term:
 
-- Broader E2E operational hardening and policy controls.
+- Metrics/status surfaces for routes, sessions, reconnects, and E2E streams.
+- Configurable timeout/backoff policy.
 - UDP support.
 - Topology/status commands.
 - More complete direction-independent peer/session behavior.
@@ -391,4 +394,4 @@ Server/relay configs use `peers` for relay neighbors; client configs use `server
 
 ## Status
 
-Experimental. The current code supports one-hop and explicit-route multi-hop TCP forwarding over QUIC/mTLS. APIs, config, and protocol details are expected to change.
+Experimental. The current code supports one-hop and explicit-route multi-hop TCP forwarding over QUIC/mTLS, plus optional required E2E payload encryption for configured TCP services. APIs, config, and protocol details are expected to change.
