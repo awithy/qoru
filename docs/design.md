@@ -410,9 +410,9 @@ The node ID is extracted from the URI SAN and used as the authenticated peer ide
 
 ## End-to-End Service Identity and Payload Encryption
 
-Service identity certificate plumbing is implemented for config loading, validation, development certificate generation, and certificate verification helpers. It is not used by the runtime handshake yet.
+Service identity certificate plumbing is implemented for config loading, validation, development certificate generation, startup service-certificate validation/cache, and required-E2E runtime handshakes.
 
-The target end-to-end encryption model separates node identity from service identity:
+The end-to-end encryption model separates node identity from service identity:
 
 ```text
 QUIC/mTLS identity:     spiffe://qoru/node/relay-b
@@ -829,9 +829,17 @@ nc 127.0.0.1 15432
 Automated smoke tests are available:
 
 ```sh
+make demo-all
+```
+
+Or run them individually:
+
+```sh
 make demo-e2e
 make demo-multihop
 make demo-threehop
+make demo-e2e-auto-direct
+make demo-e2e-encrypted
 ```
 
 `demo-multihop` exercises:
@@ -885,6 +893,6 @@ Completed in the current service/E2E track:
 
 Next:
 
-1. Add broader E2E smoke/demo coverage and improve runtime diagnostics.
-2. Harden close/error semantics and observability for encrypted streams.
+1. Add broader E2E examples and operational documentation.
+2. Improve encrypted stream observability and metrics.
 3. Later: dynamic service advertisement/topology, richer health-aware route selection, non-ordered candidate selection policies, and UDP support.

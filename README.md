@@ -37,7 +37,13 @@ TCP client -> qoru client -> relay-a -> relay-b -> TCP target
 
 ## Quick Start: Local Demo
 
-Run the automated local smoke tests:
+Run all automated local smoke tests:
+
+```sh
+make demo-all
+```
+
+Or run individual smoke tests:
 
 ```sh
 make demo-e2e
@@ -335,15 +341,20 @@ docs/local-demo.md
 docs/archive/design-discussion1.md
 ```
 
-Example multi-hop configs:
+Example multi-hop and encrypted configs:
 
 ```text
 examples/config/client-multihop.yaml
 examples/config/client-threehop.yaml
+examples/config/client-encrypted-multihop.yaml
+examples/config/client-e2e-routes.yaml
 examples/config/relay-a.yaml
+examples/config/relay-a-e2e-routes.yaml
 examples/config/relay-b.yaml
+examples/config/relay-b-encrypted.yaml
 examples/config/relay-b-threehop.yaml
 examples/config/relay-c.yaml
+examples/config/relay-c-encrypted.yaml
 ```
 
 Server/relay configs use `peers` for relay neighbors; client configs use `servers` for direct upstream entry points. For routed egress traffic, the previous-hop relay must be listed in top-level `peers`. For intermediate relay forwarding, the previous hop must be listed in `allowed_relay_clients`; if this list is omitted or empty, any authenticated node may use that server as an intermediate relay. For now, configure `dial: true` on only one side of a peer relationship. The other side should list the peer without `dial` or with `dial: false` to accept/register inbound sessions. Dialing peers reconnect forever with capped exponential backoff. Mutual dialing is unsupported; duplicate peer sessions are logged and closed with the first live session winning.

@@ -1,0 +1,27 @@
+node_id: relay-c
+mode: server
+
+identity:
+  cert: ./dev/certs/relay-c.crt
+  key: ./dev/certs/relay-c.key
+  ca: ./dev/certs/ca.crt
+
+service_identity:
+  ca: ./dev/certs/service-ca.crt
+
+listen: 127.0.0.1:4435
+
+peers:
+  - id: relay-a
+
+services:
+  - name: echo
+    protocol: tcp
+    target: 127.0.0.1:9000
+    # In E2E mode this authorizes the original ingress client,
+    # not the previous-hop relay.
+    peers:
+      - client-1
+    e2e:
+      cert: ./dev/certs/relay-c-echo.crt
+      key: ./dev/certs/relay-c-echo.key

@@ -332,7 +332,7 @@ Service-side behavior:
 - if a relayed/routed request does not have `E2ERequired` and the selected service has `services[].e2e`, reject plaintext
 - direct one-hop plaintext remains allowed for E2E-capable services so `e2e: auto` can skip redundant frame encryption
 - final E2E service authorization uses original client identity from the E2E handshake
-- target dialing for E2E streams happens only after successful E2E authentication and authorization
+- target dialing for E2E streams happens after successful E2E client authentication/authorization and before `E2EServerHello`; setup failures are reported with `E2EClose` carrying a protocol `ConnectCode`
 
 This separates policy cleanly:
 

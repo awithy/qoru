@@ -10,7 +10,13 @@ Additional smoke tests exercise explicit two-hop and three-hop relay routes, plu
 
 ## Automated end-to-end checks
 
-Run the local smoke tests:
+Run all local smoke tests:
+
+```sh
+make demo-all
+```
+
+Or run individual smoke tests:
 
 ```sh
 make demo-e2e

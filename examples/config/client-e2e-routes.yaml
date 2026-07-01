@@ -1,0 +1,30 @@
+node_id: client-1
+mode: client
+
+identity:
+  cert: ./dev/certs/client-1.crt
+  key: ./dev/certs/client-1.key
+  ca: ./dev/certs/ca.crt
+
+service_identity:
+  ca: ./dev/certs/service-ca.crt
+
+servers:
+  - id: relay-a
+    address: 127.0.0.1:4433
+
+routes:
+  - service: echo
+    protocol: tcp
+    selection: ordered
+    candidates:
+      - egress: relay-b
+        route: [relay-a, relay-b]
+      - egress: relay-c
+        route: [relay-a, relay-c]
+
+forwards:
+  - protocol: tcp
+    listen: 127.0.0.1:15432
+    service: echo
+    e2e: auto
