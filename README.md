@@ -4,12 +4,31 @@
 
 The long-term goal is to create a small authenticated relay overlay where clients and relay nodes can forward traffic across one or more hops while preserving end-to-end payload confidentiality from intermediary relays.
 
-The current implementation supports TCP forwarding over QUIC/mTLS, including direct one-hop forwarding and explicit-route multi-hop forwarding through configured relay peers:
+The current implementation supports TCP forwarding over QUIC/mTLS, including direct one-hop forwarding and explicit-route multi-hop forwarding through configured relay peers.
 
-```text
-TCP client -> qoru client -> QUIC/mTLS -> qoru server -> TCP target
-TCP client -> qoru client -> relay-a -> relay-b -> TCP target
-```
+## Topologies
+
+The Mermaid sources for these rendered diagrams are in `docs/diagrams/`. Regenerate the PNGs with `make diagrams`.
+
+### Direct one-hop forwarding
+
+![Direct one-hop forwarding](docs/diagrams/direct-one-hop.png)
+
+[Mermaid source](docs/diagrams/direct-one-hop.mmd)
+
+### Explicit multi-hop forwarding
+
+![Explicit multi-hop forwarding](docs/diagrams/explicit-multihop.png)
+
+[Mermaid source](docs/diagrams/explicit-multihop.mmd)
+
+### End-to-end encrypted payloads over relays
+
+![End-to-end encrypted payloads over relays](docs/diagrams/e2e-over-relays.png)
+
+[Mermaid source](docs/diagrams/e2e-over-relays.mmd)
+
+QUIC/mTLS authenticates and encrypts each adjacent hop. When E2E mode is enabled, TCP payload bytes are additionally encrypted from the ingress client to the egress service node so intermediary relays only forward opaque E2E frames.
 
 ## Current Features
 

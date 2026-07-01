@@ -1,4 +1,4 @@
-.PHONY: build test demo-all demo-e2e demo-multihop demo-threehop demo-e2e-encrypted demo-e2e-auto-direct gen-dev-certs
+.PHONY: build test demo-all demo-e2e demo-multihop demo-threehop demo-e2e-encrypted demo-e2e-auto-direct gen-dev-certs diagrams
 
 build:
 	@mkdir -p build
@@ -26,3 +26,9 @@ demo-e2e-auto-direct:
 
 gen-dev-certs:
 	./dev/gen-certs.sh
+
+diagrams:
+	@for f in docs/diagrams/*.mmd; do \
+		out="$${f%.mmd}.png"; \
+		npx -y @mermaid-js/mermaid-cli -i "$$f" -o "$$out" -b white; \
+	done

@@ -1,0 +1,7 @@
+flowchart LR
+    app["TCP client"] --> ingress["qoru client / ingress"]
+    ingress -->|"QUIC/mTLS"| relayA["relay-a"]
+    relayA -->|"QUIC/mTLS"| relayB["relay-b / egress"]
+    relayB -->|"TCP"| target["TCP target"]
+
+    ingress -. "route: [relay-a, relay-b]" .-> relayB

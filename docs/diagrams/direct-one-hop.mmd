@@ -1,0 +1,4 @@
+flowchart LR
+    app["TCP client"] --> client["qoru client"]
+    client -->|"QUIC/mTLS"| server["qoru server"]
+    server -->|"TCP"| target["TCP target"]
